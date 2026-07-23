@@ -1,0 +1,6 @@
+# Nim build artifacts
+nimcache/
+*.exe
+tests/test_bf16
+benchmarks/bench_bf16
+!*.nim
