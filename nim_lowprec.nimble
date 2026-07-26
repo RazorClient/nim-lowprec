@@ -16,6 +16,10 @@ task test, "Run the test suite":
   exec "nim c -r --hints:off tests/test_bf16.nim"
   exec "nim c -r --hints:off tests/test_bf16_conformance.nim"
   exec "nim c -r --hints:off tests/test_f16_conformance.nim"
+  exec "nim c -r --hints:off tests/test_f8_conformance.nim"
+  exec "nim c -r --hints:off tests/test_intx_conformance.nim"
+  exec "nim c -r --hints:off tests/test_reduce.nim"
+  exec "nim c -r --hints:off tests/test_quant.nim"
 
 task refs, "Generate reference vectors (needs python3 + numpy + ml_dtypes)":
   exec "python3 tests/gen_reference.py"
