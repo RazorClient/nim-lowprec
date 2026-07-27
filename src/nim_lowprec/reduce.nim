@@ -11,17 +11,25 @@
 import std/math
 import ./common
 
+template foldDecoded(x, contribution: untyped): float32 =
+  ## Accumulate `x` into a float32 total (the accumulate-WIDE half of the
+  ## contract). `it` is the fp32-decoded element; `contribution` is its addend.
+  ## `decode` is resolved by the enclosing generic's `mixin decode`.
+  var acc = 0.0'f32
+  for v in x:
+    let it {.inject.} = decode(v)
+    acc += contribution
+  acc
+
 func sum*[T: LowPrec](x: openArray[T]): float32 =
   ## Σ xᵢ, accumulated in float32.
   mixin decode
-  result = 0.0'f32
-  for v in x: result += decode(v)
+  foldDecoded(x, it)
 
 func asum*[T: LowPrec](x: openArray[T]): float32 =
   ## Σ |xᵢ|.
   mixin decode
-  result = 0.0'f32
-  for v in x: result += abs(decode(v))
+  foldDecoded(x, abs(it))
 
 func dot*[T: LowPrec](a, b: openArray[T]): float32 =
   ## Σ aᵢ·bᵢ, accumulated in float32 (the core contract).
@@ -33,11 +41,7 @@ func dot*[T: LowPrec](a, b: openArray[T]): float32 =
 func nrm2*[T: LowPrec](x: openArray[T]): float32 =
   ## Euclidean norm √(Σ xᵢ²).
   mixin decode
-  var acc = 0.0'f32
-  for v in x:
-    let d = decode(v)
-    acc += d * d
-  sqrt(acc)
+  sqrt(foldDecoded(x, it * it))
 
 func absmax*[T: LowPrec](x: openArray[T]): float32 =
   ## max |xᵢ| — the one stateless statistic quantizers key their scale off.

@@ -12,7 +12,7 @@
 ## (monotonic) finite code space, with per-format saturation / Inf / NaN edges.
 
 import std/math
-import ./dtypes
+import ./common, ./tinyfloat
 
 type
   F8E4M3*     = distinct uint8   ## OCP fp8 e4m3fn
@@ -30,21 +30,11 @@ const
   fmtE4M3FNUZ = Fp8Fmt(ebits: 4, mbits: 3, bias: 8,  cmax: 0x7F, hasInf: false, fnuz: true)
   fmtE5M2FNUZ = Fp8Fmt(ebits: 5, mbits: 2, bias: 16, cmax: 0x7F, hasInf: false, fnuz: true)
 
-# ---- shared numeric core (operate on raw uint8 + a format descriptor) ----
+# ---- format-specific edges layered on the shared tinyfloat core ----
 
-func pow2(e: int): float64 {.inline.} =
-  ## Exact 2^e for e in the double normal range (our exponents are tiny).
-  cast[float64](uint64(e + 1023) shl 52)
-
-func mag8(c: int, f: Fp8Fmt): float64 =
-  ## Positive magnitude of a finite code `c` (monotonically increasing in c).
-  let ef = (c shr f.mbits) and ((1 shl f.ebits) - 1)
-  let mf = c and ((1 shl f.mbits) - 1)
-  if ef == 0:
-    if mf == 0: 0.0
-    else: mf.float64 * pow2(1 - f.bias - f.mbits)            # subnormal
-  else:
-    float64((1 shl f.mbits) + mf) * pow2(ef - f.bias - f.mbits)  # normal
+func mag8(c: int, f: Fp8Fmt): float64 {.inline.} =
+  ## Positive magnitude of finite code `c`, keyed by this format's bit layout.
+  tinyMag(c, f.ebits, f.mbits, f.bias)
 
 func decode8(u: uint8, f: Fp8Fmt): float32 =
   let neg = (u and 0x80'u8) != 0'u8
@@ -84,29 +74,17 @@ func encode8(x: float32, f: Fp8Fmt): uint8 =
     else: return signBit or 0x7f'u8
   if a >= vmax:
     return signBit or uint8(f.cmax)
-  # nearest finite code in [0, cmax] with round-to-nearest-even
-  var lo = 0
-  var hi = f.cmax
-  while lo < hi:
-    let m = (lo + hi) div 2
-    if mag8(m, f) >= a: hi = m
-    else: lo = m + 1
-  let cHi = hi
-  if cHi == 0:
-    return (if f.fnuz: 0x00'u8 else: signBit)                # zero (fnuz has no -0)
-  let cLo = cHi - 1
-  let midv = (mag8(cLo, f) + mag8(cHi, f)) * 0.5
-  var code: int
-  if a < midv: code = cLo
-  elif a > midv: code = cHi
-  else: code = (if (cLo and 1) == 0: cLo else: cHi)          # tie → even
+  # nearest finite code in [0, cmax], round-to-nearest-even (shared core)
+  let code = nearestCode(a, f.ebits, f.mbits, f.bias, f.cmax)
   if code == 0:
-    return (if f.fnuz: 0x00'u8 else: signBit)
+    return (if f.fnuz: 0x00'u8 else: signBit)                # rounds to zero (fnuz has no -0)
   signBit or uint8(code)
 
 # ---- generate the four types' identical API surface via one template ----
 
 template defF8(T, toFn, FMT, DT: untyped) =
+  ## fp8-specific bit access, conversions and predicates; the shared
+  ## comparison / arithmetic / LowPrec surface comes from defFloatOps.
   func bits*(x: T): uint8 {.inline.} = uint8(x)
   func toFloat32*(x: T): float32 {.inline.} = decode8(uint8(x), FMT)
   func toFn*(x: float32): T {.inline.} = T(encode8(x, FMT))
@@ -114,18 +92,7 @@ template defF8(T, toFn, FMT, DT: untyped) =
   func isNaN*(x: T): bool {.inline.} = classify(x.toFloat32) == fcNan
   func isInf*(x: T): bool {.inline.} = classify(x.toFloat32) in {fcInf, fcNegInf}
   func signbit*(x: T): bool {.inline.} = (uint8(x) and 0x80'u8) != 0'u8
-  func `$`*(x: T): string = $x.toFloat32
-  func `==`*(a, b: T): bool {.inline.} = a.toFloat32 == b.toFloat32
-  func `<`*(a, b: T): bool {.inline.}  = a.toFloat32 <  b.toFloat32
-  func `<=`*(a, b: T): bool {.inline.} = a.toFloat32 <= b.toFloat32
-  func `+`*(a, b: T): T {.inline.} = toFn(a.toFloat32 + b.toFloat32)
-  func `-`*(a, b: T): T {.inline.} = toFn(a.toFloat32 - b.toFloat32)
-  func `*`*(a, b: T): T {.inline.} = toFn(a.toFloat32 * b.toFloat32)
-  func `/`*(a, b: T): T {.inline.} = toFn(a.toFloat32 / b.toFloat32)
-  func decode*(x: T): float32 {.inline.} = x.toFloat32
-  func encode*(f: float32; _: typedesc[T]): T {.inline.} = toFn(f)
-  func storageBits*(_: typedesc[T]): int {.inline.} = 8
-  func dtypeCode*(_: typedesc[T]): DType {.inline.} = DT
+  defFloatOps(T, toFn, 8, DT)
 
 defF8(F8E4M3,     toF8E4M3,     fmtE4M3,     dtF8E4M3)
 defF8(F8E5M2,     toF8E5M2,     fmtE5M2,     dtF8E5M2)

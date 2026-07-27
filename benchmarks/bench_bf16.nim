@@ -1,21 +1,24 @@
-import std/[times, monotimes]
+## bf16 round-trip LATENCY, not throughput: each iteration's input depends on the
+## previous one, so the chain cannot be vectorized or software-pipelined away. This
+## is the cost of `toBF16 → toFloat32` when it sits in the middle of dependent
+## scalar work — the number that matters for element-at-a-time code.
+##
+## The batch/vectorized throughput comparison is `bench_simd`; there is nothing to
+## compare against here, so this group reports one row.
+
 import nim_lowprec/bfloat16
+import ./harness
 
-const N = 50_000_000
+const N = 20_000_000
 
-proc benchRoundTrip(): float32 =
-  var acc = 0.0'f32
+header "bf16 round-trip latency"
+
+var acc = 0.0'f32
+var g = elemGroup("toBF16 → toFloat32  (dependent chain)", N)
+g.measure "scalar", acc:
+  acc = 0.0'f32
   var x = 1.0001'f32
   for i in 0 ..< N:
     acc += toBF16(x).toFloat32
     x *= 1.0000001'f32
-  acc
-
-let start = getMonoTime()
-let acc = benchRoundTrip()
-let elapsed = (getMonoTime() - start).inNanoseconds.float / 1e9
-
-echo "round-trip conversions: ", N
-echo "elapsed:                ", elapsed, " s"
-echo "throughput:             ", (N.float / elapsed / 1e6), " M ops/s"
-echo "checksum:               ", acc  # keep the optimizer honest
+g.report()

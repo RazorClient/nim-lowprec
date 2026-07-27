@@ -10,3 +10,18 @@ type
   LowPrec* = concept x, type T
     decode(x) is float32
     storageBits(T) is int
+
+template defFloatOps*(T, toFn, bitsN, DT: untyped) =
+  mixin toFloat32
+  func `$`*(x: T): string = $x.toFloat32
+  func `==`*(a, b: T): bool {.inline.} = a.toFloat32 == b.toFloat32
+  func `<`*(a, b: T): bool {.inline.}  = a.toFloat32 <  b.toFloat32
+  func `<=`*(a, b: T): bool {.inline.} = a.toFloat32 <= b.toFloat32
+  func `+`*(a, b: T): T {.inline.} = toFn(a.toFloat32 + b.toFloat32)
+  func `-`*(a, b: T): T {.inline.} = toFn(a.toFloat32 - b.toFloat32)
+  func `*`*(a, b: T): T {.inline.} = toFn(a.toFloat32 * b.toFloat32)
+  func `/`*(a, b: T): T {.inline.} = toFn(a.toFloat32 / b.toFloat32)
+  func decode*(x: T): float32 {.inline.} = x.toFloat32
+  func encode*(f: float32; _: typedesc[T]): T {.inline.} = toFn(f)
+  func storageBits*(_: typedesc[T]): int {.inline.} = bitsN
+  func dtypeCode*(_: typedesc[T]): DType {.inline.} = DT

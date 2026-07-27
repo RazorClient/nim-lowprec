@@ -1,5 +1,5 @@
 # Conformance suite for F16 (IEEE binary16):
-#   - self-checking invariants (need no external oracle)
+#   - self-checking invariants
 #   - a differential check against numpy.float16 golden vectors
 
 import std/[unittest, streams, os]

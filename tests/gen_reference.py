@@ -92,6 +92,57 @@ def emit_fp8(name, dt):
         fh.write(outs.astype("<u1").tobytes())
 
 
+def emit_mx_float(name, dt, ncodes, seed):
+    # 1) decode : all codes, exhaustive (tiny code spaces).
+    codes = np.arange(ncodes, dtype=np.uint8)
+    with np.errstate(over="ignore", invalid="ignore"):
+        f32 = codes.view(dt).astype(np.float32)
+    f32.view("<u4").tofile(os.path.join(HERE, f"ref_{name}_to_f32.bin"))
+
+    # 2) encode : finite edges + random. These formats have NO NaN, so NaN
+    # *inputs* are undefined — the Nim test skips them; inf saturates to max.
+    edge_vals = np.array([0.0, -0.0, 0.25, 0.5, 1.0, -1.0, 1.5, -1.5, 2.0, 3.0,
+                          4.0, 6.0, 7.0, 7.5, 8.0, 28.0, 100.0, -100.0,
+                          np.inf, -np.inf], dtype=np.float32)
+    edges = edge_vals.view(np.uint32)
+    rng = np.random.default_rng(seed)
+    rand = rng.integers(0, 1 << 32, size=2_000_000, dtype=np.uint64).astype(np.uint32)
+    ins = np.unique(np.concatenate([edges, rand])).astype(np.uint32)
+    with np.errstate(over="ignore", invalid="ignore"):
+        outs = ins.view(np.float32).astype(dt).view(np.uint8)
+    with open(os.path.join(HERE, f"ref_f32_to_{name}.bin"), "wb") as fh:
+        fh.write(np.uint32(len(ins)).tobytes())
+        fh.write(ins.astype("<u4").tobytes())
+        fh.write(outs.astype("<u1").tobytes())
+
+
+def emit_e8m0():
+    # 1) decode : all 256 codes (0x00 = 2^-127, 0xFF = NaN).
+    codes = np.arange(256, dtype=np.uint8)
+    with np.errstate(over="ignore", invalid="ignore"):
+        f32 = codes.view(ml_dtypes.float8_e8m0fnu).astype(np.float32)
+    f32.view("<u4").tofile(os.path.join(HERE, "ref_e8m0_to_f32.bin"))
+
+    # 2) encode : NORMAL positive floats only (+ specials). E8M0 is a scale, so
+    # its domain is normal positive floats; ml_dtypes rounds float32-SUBNORMAL
+    # inputs (~1e-39) UP in a way our true-round-to-nearest encode deliberately
+    # doesn't — an out-of-domain quirk we don't replicate. 0/inf/nan → 0xFF in
+    # both, so a direct bit-compare works.
+    edge_vals = np.array([1.0, 1.4, 1.5, 1.9, 2.0, 2.9, 3.0, 0.4, 0.75, 6.0,
+                          2.0**-126, 2.0**126, 2.0**127, 0.0, np.inf, np.nan],
+                         dtype=np.float32)
+    edges = edge_vals.view(np.uint32)
+    rng = np.random.default_rng(23)
+    rand = rng.integers(0x00800000, 0x7f800000, size=2_000_000, dtype=np.uint64).astype(np.uint32)  # normal +
+    ins = np.unique(np.concatenate([edges, rand])).astype(np.uint32)
+    with np.errstate(over="ignore", invalid="ignore"):
+        outs = ins.view(np.float32).astype(ml_dtypes.float8_e8m0fnu).view(np.uint8)
+    with open(os.path.join(HERE, "ref_f32_to_e8m0.bin"), "wb") as fh:
+        fh.write(np.uint32(len(ins)).tobytes())
+        fh.write(ins.astype("<u4").tobytes())
+        fh.write(outs.astype("<u1").tobytes())
+
+
 if __name__ == "__main__":
     emit_bf16()
     emit_f16()
@@ -99,4 +150,8 @@ if __name__ == "__main__":
     emit_fp8("e5m2", ml_dtypes.float8_e5m2)
     emit_fp8("e4m3fnuz", ml_dtypes.float8_e4m3fnuz)
     emit_fp8("e5m2fnuz", ml_dtypes.float8_e5m2fnuz)
-    print(f"wrote bf16 + f16 + fp8x4 reference vectors to {HERE}")
+    emit_mx_float("f4e2m1", ml_dtypes.float4_e2m1fn, 16, 41)
+    emit_mx_float("f6e2m3", ml_dtypes.float6_e2m3fn, 64, 42)
+    emit_mx_float("f6e3m2", ml_dtypes.float6_e3m2fn, 64, 43)
+    emit_e8m0()
+    print(f"wrote bf16 + f16 + fp8x4 + mxfp4/6 + e8m0 reference vectors to {HERE}")

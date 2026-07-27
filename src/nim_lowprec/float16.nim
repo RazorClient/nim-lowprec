@@ -1,18 +1,22 @@
-import ./dtypes
+## nim_lowprec/float16 — IEEE binary16 (1/5/10) <-> float32 bit conversions,
+## ported from NumPy's half<->float routines: round-to-nearest-even, subnormal
+## normalization, and Inf/NaN with mantissa payload preserved. Local variable
+## names mirror the NumPy source to keep the port auditable. Verified bit-exact
+## against ml_dtypes float16.
+
+import ./common
 
 type
   F16* = distinct uint16
-    ## An IEEE-754 binary16 value.
 
 const
   f16Zero*   = F16(0x0000'u16)
   f16One*    = F16(0x3c00'u16)
   f16Inf*    = F16(0x7c00'u16)
   f16NegInf* = F16(0xfc00'u16)
-  f16NaN*    = F16(0x7e00'u16)   ## canonical quiet NaN (positive)
+  f16NaN*    = F16(0x7e00'u16)   # canonical quiet NaN (positive)
 
 func bits*(x: F16): uint16 {.inline.} =
-  ## Raw 16-bit storage of `x`.
   uint16(x)
 
 func floatbitsFromHalf(h: uint16): uint32 =
@@ -80,17 +84,4 @@ func isNaN*(x: F16): bool {.inline.} = (uint16(x) and 0x7fff'u16) > 0x7c00'u16
 func isInf*(x: F16): bool {.inline.} = (uint16(x) and 0x7fff'u16) == 0x7c00'u16
 func signbit*(x: F16): bool {.inline.} = (uint16(x) and 0x8000'u16) != 0'u16
 
-func `$`*(x: F16): string = $x.toFloat32
-func `==`*(a, b: F16): bool {.inline.} = a.toFloat32 == b.toFloat32
-func `<`*(a, b: F16): bool {.inline.}  = a.toFloat32 <  b.toFloat32
-func `<=`*(a, b: F16): bool {.inline.} = a.toFloat32 <= b.toFloat32
-
-func `+`*(a, b: F16): F16 {.inline.} = toF16(a.toFloat32 + b.toFloat32)
-func `-`*(a, b: F16): F16 {.inline.} = toF16(a.toFloat32 - b.toFloat32)
-func `*`*(a, b: F16): F16 {.inline.} = toF16(a.toFloat32 * b.toFloat32)
-func `/`*(a, b: F16): F16 {.inline.} = toF16(a.toFloat32 / b.toFloat32)
-
-func decode*(x: F16): float32 {.inline.} = x.toFloat32
-func encode*(f: float32; _: typedesc[F16]): F16 {.inline.} = toF16(f)
-func storageBits*(_: typedesc[F16]): int {.inline.} = 16
-func dtypeCode*(_: typedesc[F16]): DType {.inline.} = dtF16
+defFloatOps(F16, toF16, 16, dtF16)

@@ -1,7 +1,6 @@
 # Conformance suite for BF16:
-#   - self-checking invariants (need no external oracle)
+#   - self-checking invariants
 #   - a differential check against ml_dtypes golden vectors
-#
 
 import std/[unittest, streams, os]
 import nim_lowprec/bfloat16

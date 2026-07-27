@@ -16,21 +16,29 @@ type
   I4* = distinct int8      ## signed 4-bit integer, logical value in -8..7
   I1* = distinct uint8     ## a sign bit: 0 → +1, 1 → −1
 
+# ---- shared surface for the int8-backed types (I8, I4) via one template ----
+# Both are `distinct int8`, so value decode, structural ==/$, and the
+# LowPrec/DType hooks are identical. `toFn` is the float32→T rounding+clamp
+# constructor — its range differs per type, so it stays hand-written and is
+# threaded in as a parameter (mirroring float8.nim's `defF8`).
+
+template defInt8Backed(T, toFn, BITS, DT: untyped) =
+  func toFloat32*(x: T): float32 {.inline.} = float32(int8(x))
+  func `==`*(a, b: T): bool {.inline.} = int8(a) == int8(b)
+  func `$`*(x: T): string = $int8(x)
+  func decode*(x: T): float32 {.inline.} = x.toFloat32
+  func encode*(f: float32; _: typedesc[T]): T {.inline.} = toFn(f)
+  func storageBits*(_: typedesc[T]): int {.inline.} = BITS
+  func dtypeCode*(_: typedesc[T]): DType {.inline.} = DT
+
 # ---------- I8 ----------
-func toFloat32*(x: I8): float32 {.inline.} = float32(int8(x))
 func toI8*(f: float32): I8 {.inline.} =
   ## Round-to-nearest (ties away from zero) then clamp to the int8 range.
   I8(int8(clamp(round(f), -128.0'f32, 127.0'f32)))
-func `==`*(a, b: I8): bool {.inline.} = int8(a) == int8(b)
-func `$`*(x: I8): string = $int8(x)
-func decode*(x: I8): float32 {.inline.} = x.toFloat32
-func encode*(f: float32; _: typedesc[I8]): I8 {.inline.} = toI8(f)
-func storageBits*(_: typedesc[I8]): int {.inline.} = 8
-func dtypeCode*(_: typedesc[I8]): DType {.inline.} = dtI8
+defInt8Backed(I8, toI8, 8, dtI8)
 
 # ---------- I4 ----------
 func value*(x: I4): int {.inline.} = int(int8(x))                    ## logical -8..7
-func toFloat32*(x: I4): float32 {.inline.} = float32(int8(x))
 func toI4*(f: float32): I4 {.inline.} =
   I4(int8(clamp(round(f), -8.0'f32, 7.0'f32)))
 func nibble*(x: I4): uint8 {.inline.} = uint8(int8(x)) and 0x0f'u8   ## two's-complement 4-bit
@@ -38,14 +46,11 @@ func fromNibble*(n: uint8): I4 {.inline.} =
   ## Decode a 4-bit two's-complement nibble (0..15) → -8..7.
   let v = n and 0x0f'u8
   I4(if v >= 8'u8: int8(int(v) - 16) else: int8(v))
-func `==`*(a, b: I4): bool {.inline.} = int8(a) == int8(b)
-func `$`*(x: I4): string = $int8(x)
-func decode*(x: I4): float32 {.inline.} = x.toFloat32
-func encode*(f: float32; _: typedesc[I4]): I4 {.inline.} = toI4(f)
-func storageBits*(_: typedesc[I4]): int {.inline.} = 4
-func dtypeCode*(_: typedesc[I4]): DType {.inline.} = dtI4
+defInt8Backed(I4, toI4, 4, dtI4)
 
 # ---------- I1 (sign bit) ----------
+# uint8-backed with ±1 sign semantics — decode is NOT an int cast — so the value
+# conversions stay hand-written; only the trailing hooks match the others.
 func toFloat32*(x: I1): float32 {.inline.} =
   (if (uint8(x) and 1'u8) != 0'u8: -1.0'f32 else: 1.0'f32)
 func toI1*(f: float32): I1 {.inline.} =
