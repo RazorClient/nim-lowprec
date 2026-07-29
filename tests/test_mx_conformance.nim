@@ -10,7 +10,7 @@ import nim_lowprec/mxfloat
 
 func f32bits(u: uint32): float32 =
   cast[float32](u)
-const refDir = currentSourcePath().parentDir
+const refDir = currentSourcePath().parentDir / "refs"
 
 template mxFloatSuite(
     TT, toFn: untyped, nm, decf, encf: static string, ncodes: static int

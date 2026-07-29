@@ -8,7 +8,7 @@ import nim_lowprec/float8
 
 func f32bits(u: uint32): float32 =
   cast[float32](u)
-const refDir = currentSourcePath().parentDir
+const refDir = currentSourcePath().parentDir / "refs"
 
 template f8suite(TT, toFn: untyped, nm, decf, encf: static string) =
   suite nm:

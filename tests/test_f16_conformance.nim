@@ -7,7 +7,7 @@ import nim_lowprec/float16
 
 func f32bits(u: uint32): float32 =
   cast[float32](u)
-const refDir = currentSourcePath().parentDir
+const refDir = currentSourcePath().parentDir / "refs"
 
 suite "fp16 invariants (self-checking, no oracle)":
   test "f16 -> f32 -> f16 identity for all 65536 patterns":

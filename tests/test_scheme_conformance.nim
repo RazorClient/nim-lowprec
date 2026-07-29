@@ -20,10 +20,10 @@ import nim_lowprec/[float16, float8, mxfloat, intx, ggml, quant, nvfp4]
 # The references round mul-then-sub in two steps (numpy); no compiler FMAs here.
 {.localPassc: "-ffp-contract=off".}
 
-const here = currentSourcePath().parentDir
+const refDir = currentSourcePath().parentDir / "refs"
 
 proc readBytes(name: string): seq[byte] =
-  let path = here / name
+  let path = refDir / name
   if not fileExists(path):
     return @[]
   result = newSeq[byte](getFileSize(path))
