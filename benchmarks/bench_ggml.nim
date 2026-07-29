@@ -19,15 +19,16 @@ import ./harness
 const
   M = 4096
   K = 4096
-  bpr = K div QK              ## blocks per row
+  bpr = K div QK ## blocks per row
   shape = "M = " & $M & ", K = " & $K & ", QK = " & $QK
   flops = 2.0 * M.float * K.float
   mid = M div 2
 
 var x = newSeq[float32](K)
-for i in 0 ..< K: x[i] = float32(i mod 7) * 0.1'f32 - 0.3'f32
+for i in 0 ..< K:
+  x[i] = float32(i mod 7) * 0.1'f32 - 0.3'f32
 var y = newSeq[float32](M)
-var row = newSeq[float32](K)     ## scratch for the unfused path
+var row = newSeq[float32](K) ## scratch for the unfused path
 
 header "ggml Q8_0 / Q4_0"
 
@@ -36,12 +37,14 @@ header "ggml Q8_0 / Q4_0"
 var q8 = newSeq[BlockQ8_0](M * bpr)
 for bi in 0 ..< q8.len:
   q8[bi].d = toF16(0.0125'f32)
-  for i in 0 ..< QK: q8[bi].qs[i] = int8(((bi + i) mod 255) - 127)
+  for i in 0 ..< QK:
+    q8[bi].qs[i] = int8(((bi + i) mod 255) - 127)
 
 var q4 = newSeq[BlockQ4_0](M * bpr)
 for bi in 0 ..< q4.len:
   q4[bi].d = toF16(0.0125'f32)
-  for i in 0 ..< QK div 2: q4[bi].qs[i] = uint8((bi * 7 + i * 11) and 0xff)
+  for i in 0 ..< QK div 2:
+    q4[bi].qs[i] = uint8((bi * 7 + i * 11) and 0xff)
 
 block: # ---- 1. block dequant → fp32 (scalar-only, no kernel yet) ----
   # One row of blocks at a time — the shape a row-major GEMV loop asks for.
@@ -65,24 +68,31 @@ block: # ---- 1. block dequant → fp32 (scalar-only, no kernel yet) ----
   h.report()
 
 block: # ---- 2. Q8_0 GEMV ----
-  proc scalarFused(q8: openArray[BlockQ8_0]; x: openArray[float32];
-                   y: var openArray[float32]) =
+  proc scalarFused(
+      q8: openArray[BlockQ8_0], x: openArray[float32], y: var openArray[float32]
+  ) =
     for r in 0 ..< M:
       var total = 0.0'f32
       for bi in 0 ..< bpr:
         let blk = q8[r * bpr + bi]
         let base = bi * QK
         var p = 0.0'f32
-        for i in 0 ..< QK: p += float32(blk.qs[i]) * x[base + i]
+        for i in 0 ..< QK:
+          p += float32(blk.qs[i]) * x[base + i]
         total += p * blk.d.toFloat32
       y[r] = total
 
-  proc unfused(q8: openArray[BlockQ8_0]; x: openArray[float32];
-               row: var openArray[float32]; y: var openArray[float32]) =
+  proc unfused(
+      q8: openArray[BlockQ8_0],
+      x: openArray[float32],
+      row: var openArray[float32],
+      y: var openArray[float32],
+  ) =
     for r in 0 ..< M:
       dequantizeQ8_0(q8.toOpenArray(r * bpr, (r + 1) * bpr - 1), row)
       var total = 0.0'f32
-      for i in 0 ..< K: total += row[i] * x[i]
+      for i in 0 ..< K:
+        total += row[i] * x[i]
       y[r] = total
 
   var g = flopGroup("Q8_0 GEMV", shape, flops)
@@ -95,8 +105,9 @@ block: # ---- 2. Q8_0 GEMV ----
   g.report()
 
 block: # ---- 3. Q4_0 GEMV (value = d·(nibble−8), ggml lane order) ----
-  proc scalarFused(q4: openArray[BlockQ4_0]; x: openArray[float32];
-                   y: var openArray[float32]) =
+  proc scalarFused(
+      q4: openArray[BlockQ4_0], x: openArray[float32], y: var openArray[float32]
+  ) =
     for r in 0 ..< M:
       var total = 0.0'f32
       for bi in 0 ..< bpr:
@@ -110,12 +121,17 @@ block: # ---- 3. Q4_0 GEMV (value = d·(nibble−8), ggml lane order) ----
         total += p * blk.d.toFloat32
       y[r] = total
 
-  proc unfused(q4: openArray[BlockQ4_0]; x: openArray[float32];
-               row: var openArray[float32]; y: var openArray[float32]) =
+  proc unfused(
+      q4: openArray[BlockQ4_0],
+      x: openArray[float32],
+      row: var openArray[float32],
+      y: var openArray[float32],
+  ) =
     for r in 0 ..< M:
       dequantizeQ4_0(q4.toOpenArray(r * bpr, (r + 1) * bpr - 1), row)
       var total = 0.0'f32
-      for i in 0 ..< K: total += row[i] * x[i]
+      for i in 0 ..< K:
+        total += row[i] * x[i]
       y[r] = total
 
   var g = flopGroup("Q4_0 GEMV", shape, flops)
@@ -134,8 +150,13 @@ block: # ---- 4. int8-activation (SDOT) forms over the same blocks ----
   # finalize is 4x more frequent than per-128) — they exist so real GGUF weights
   # can run without repacking. Exactness is pinned in tests/test_sdot.nim.
   var xq = newSeq[BlockQ8_0](bpr)
-  var g = flopGroup("Q8_0 GEMV, q8 activations (SDOT, dotprod=" &
-                    (if lpUseDotProd: "on" else: "off") & ")", shape, flops, tol = 0.0)
+  var g = flopGroup(
+    "Q8_0 GEMV, q8 activations (SDOT, dotprod=" & (if lpUseDotProd: "on" else: "off") &
+      ")",
+    shape,
+    flops,
+    tol = 0.0,
+  )
   g.measure "serial", y[mid]:
     quantizeQ8_0(x, xq)
     dequantGemvQ8_0Q8(q8, bpr, xq, y)

@@ -1,23 +1,23 @@
 type
   DType* = enum
-    dtBF16          # bfloat16              (1/8/7)
-    dtF16           # IEEE binary16         (1/5/10)
-    dtF8E4M3        # OCP fp8 e4m3fn        (1/4/3, no Inf, bias 7)
-    dtF8E5M2        # OCP fp8 e5m2          (1/5/2, bias 15)
-    dtF8E4M3FNUZ    # AMD fp8 e4m3fnuz      (bias 8, 0x80=NaN, no Inf/-0)
-    dtF8E5M2FNUZ    # AMD fp8 e5m2fnuz      (bias 16, 0x80=NaN, no Inf/-0)
-    dtE8M0          # MX shared-scale exponent (8 exp bits, no sign/mantissa)
-    dtF6E2M3        # MXFP6 e2m3
-    dtF6E3M2        # MXFP6 e3m2
-    dtF4E2M1        # MXFP4 e2m1
-    dtI8            # int8
-    dtI4            # int4 (packed 2 per byte)
-    dtI1            # sign-mask bit
+    dtBF16 # bfloat16              (1/8/7)
+    dtF16 # IEEE binary16         (1/5/10)
+    dtF8E4M3 # OCP fp8 e4m3fn        (1/4/3, no Inf, bias 7)
+    dtF8E5M2 # OCP fp8 e5m2          (1/5/2, bias 15)
+    dtF8E4M3FNUZ # AMD fp8 e4m3fnuz      (bias 8, 0x80=NaN, no Inf/-0)
+    dtF8E5M2FNUZ # AMD fp8 e5m2fnuz      (bias 16, 0x80=NaN, no Inf/-0)
+    dtE8M0 # MX shared-scale exponent (8 exp bits, no sign/mantissa)
+    dtF6E2M3 # MXFP6 e2m3
+    dtF6E3M2 # MXFP6 e3m2
+    dtF4E2M1 # MXFP4 e2m1
+    dtI8 # int8
+    dtI4 # int4 (packed 2 per byte)
+    dtI1 # sign-mask bit
 
   DTypeKind* = enum
-    dkFloat         # IEEE-like float (exponent + mantissa)
-    dkInt           # integer
-    dkScale         # scale-only exponent code (E8M0)
+    dkFloat # IEEE-like float (exponent + mantissa)
+    dkInt # integer
+    dkScale # scale-only exponent code (E8M0)
 
 func bits*(d: DType): int {.inline.} =
   case d

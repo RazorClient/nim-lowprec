@@ -13,15 +13,18 @@
 const lpSimd* {.strdefine.}: string = "auto"
 
 const
-  lpUseNeon*   = (lpSimd == "auto" and (defined(arm64) or defined(aarch64))) or
-                 lpSimd == "neon"
-  lpUseAvx2*   = lpSimd == "avx2"
+  lpUseNeon* =
+    (lpSimd == "auto" and (defined(arm64) or defined(aarch64))) or lpSimd == "neon"
+  lpUseAvx2* = lpSimd == "avx2"
   lpUseScalar* = not (lpUseNeon or lpUseAvx2)
 
 const simdBackend* =
-  when lpUseNeon: "neon"
-  elif lpUseAvx2: "avx2"
-  else:           "scalar"
+  when lpUseNeon:
+    "neon"
+  elif lpUseAvx2:
+    "avx2"
+  else:
+    "scalar"
 
 # ---- ARM dot-product (SDOT / FEAT_DotProd, ARMv8.2) ----
 #
@@ -38,8 +41,8 @@ const simdBackend* =
 #         (same result, bit-for-bit — the fallback accumulates in int32 too).
 const lpDotProd* {.strdefine.}: string = "auto"
 
-const lpUseDotProd* = lpUseNeon and
-  ((lpDotProd == "auto" and defined(macosx)) or lpDotProd == "on")
+const lpUseDotProd* =
+  lpUseNeon and ((lpDotProd == "auto" and defined(macosx)) or lpDotProd == "on")
 
 # An unknown value is a build error, not a silent fall-through to scalar.
 when lpSimd notin ["auto", "scalar", "neon", "avx2"]:

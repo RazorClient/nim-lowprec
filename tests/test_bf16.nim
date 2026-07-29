@@ -10,7 +10,7 @@ suite "bf16 conversions":
     for v in [3.14159'f32, 1.2345, -678.9, 1e-30, 1e30]:
       let approx = toBF16(v).toFloat32
       let relErr = abs(approx - v) / abs(v)
-      check relErr < 0.004  # 2^-8, the bf16 mantissa bound
+      check relErr < 0.004 # 2^-8, the bf16 mantissa bound
 
   test "special values survive":
     check toBF16(Inf.float32).toFloat32 == Inf.float32

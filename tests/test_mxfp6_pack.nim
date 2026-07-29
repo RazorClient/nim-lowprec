@@ -5,34 +5,38 @@
 import std/unittest
 import nim_lowprec/mxfloat
 
-func packedLen(n: int): int = (n * 6 + 7) div 8
+func packedLen(n: int): int =
+  (n * 6 + 7) div 8
 
-template roundTripSuite(TT: untyped; nm: static string) =
+template roundTripSuite(TT: untyped, nm: static string) =
   suite nm:
-
     test "round-trips all 64 codes":
       var vals = newSeq[TT](64)
-      for c in 0 ..< 64: vals[c] = TT(uint8(c))
+      for c in 0 ..< 64:
+        vals[c] = TT(uint8(c))
       var packed = newSeq[byte](packedLen(64))
       packF6(vals, packed)
       var un = newSeq[TT](64)
       unpackF6(packed, un)
       var mm = 0
       for c in 0 ..< 64:
-        if uint8(un[c]) != uint8(c): inc mm
+        if uint8(un[c]) != uint8(c):
+          inc mm
       check mm == 0
 
     test "round-trips ragged lengths":
       for total in [1, 2, 3, 5, 6, 7, 9, 63, 100]:
         var vals = newSeq[TT](total)
-        for i in 0 ..< total: vals[i] = TT(uint8((i * 7 + 1) and 0x3f))
+        for i in 0 ..< total:
+          vals[i] = TT(uint8((i * 7 + 1) and 0x3f))
         var packed = newSeq[byte](packedLen(total))
         packF6(vals, packed)
         var un = newSeq[TT](total)
         unpackF6(packed, un)
         var mm = 0
         for i in 0 ..< total:
-          if uint8(un[i]) != uint8((i * 7 + 1) and 0x3f): inc mm
+          if uint8(un[i]) != uint8((i * 7 + 1) and 0x3f):
+            inc mm
         check mm == 0
 
     test "unused tail bytes are exactly the minimum":
@@ -47,7 +51,6 @@ roundTripSuite(F6E2M3, "MXFP6 e2m3 pack")
 roundTripSuite(F6E3M2, "MXFP6 e3m2 pack")
 
 suite "MXFP6 exact bit-layout":
-
   test "LSB-first 24-bit little-endian group":
     # value0=1, value1=2, value2=3, value3=0
     #   g = 1 | (2<<6) | (3<<12) = 0x0001 | 0x0080 | 0x3000 = 0x3081

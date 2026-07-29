@@ -45,11 +45,14 @@ const minRowsPerThread* = 64
 proc shardCount(rows, threads: int): int =
   ## How many shards to actually use: never more than one per `minRowsPerThread`
   ## rows, never more than requested, never fewer than 1.
-  let want = if threads > 0: threads else: countProcessors()
+  let want =
+    if threads > 0:
+      threads
+    else:
+      countProcessors()
   result = max(1, min(want, rows div minRowsPerThread))
 
 when compileOption("threads"):
-
   # ---------------- persistent worker pool ----------------
   #
   # The `par*` procs above create threads per call. That is fine at ~4 ms of work per
@@ -77,7 +80,7 @@ when compileOption("threads"):
   # ones fast enough for spawn cost to dominate.
 
   type
-    ShardFn = proc (payload: pointer; row0, rows: int) {.nimcall, gcsafe.}
+    ShardFn = proc(payload: pointer, row0, rows: int) {.nimcall, gcsafe.}
 
     PoolCtx = object
       lock: Lock
@@ -114,18 +117,30 @@ when compileOption("threads"):
 
       let per = rows div nw
       let row0 = per * id
-      let myRows = if id == nw - 1: rows - per * id else: per
-      if myRows > 0: fn(payload, row0, myRows)
+      let myRows =
+        if id == nw - 1:
+          rows - per * id
+        else:
+          per
+      if myRows > 0:
+        fn(payload, row0, myRows)
 
       acquire(ctx.lock)
       dec ctx.pending
-      if ctx.pending == 0: signal(ctx.allDone)
+      if ctx.pending == 0:
+        signal(ctx.allDone)
       release(ctx.lock)
 
   proc initPool*(threads = 0): LpPool =
     ## Start `threads` workers (default `countProcessors()`, which counts E-cores —
     ## measure before trusting it). Call `shutdown` when done.
-    let nw = max(1, if threads > 0: threads else: countProcessors())
+    let nw = max(
+      1,
+      if threads > 0:
+        threads
+      else:
+        countProcessors(),
+    )
     result.ctx = cast[ptr PoolCtx](allocShared0(sizeof(PoolCtx)))
     initLock(result.ctx.lock)
     initCond(result.ctx.hasWork)
@@ -137,7 +152,8 @@ when compileOption("threads"):
 
   proc shutdown*(p: var LpPool) =
     ## Stop and join the workers. Idempotent.
-    if p.ctx == nil: return
+    if p.ctx == nil:
+      return
     acquire(p.ctx.lock)
     p.ctx.stopping = true
     broadcast(p.ctx.hasWork)
@@ -154,7 +170,7 @@ when compileOption("threads"):
     ## Workers in this pool, 0 if it was never initialized or is shut down.
     if p.ctx == nil: 0 else: p.ctx.nworkers
 
-  proc dispatch(p: var LpPool; fn: ShardFn; payload: pointer; rows: int) =
+  proc dispatch(p: var LpPool, fn: ShardFn, payload: pointer, rows: int) =
     ## Post one job and block until every worker has finished its slice.
     acquire(p.ctx.lock)
     p.ctx.fn = fn
@@ -187,40 +203,59 @@ when compileOption("threads"):
     proc workerName(s: Shard) {.thread.} =
       # The public serial kernel, over this shard's rows. Shapes come from the
       # slice lengths, which is why no library change was needed to make this work.
-      kern(s.w.toOpenArray(s.row0 * s.wStride, (s.row0 + s.rows) * s.wStride - 1),
-           s.sc.toOpenArray(s.row0 * s.sStride, (s.row0 + s.rows) * s.sStride - 1),
-           s.shape,
-           s.x.toOpenArray(0, s.k - 1),
-           s.y.toOpenArray(s.row0, s.row0 + s.rows - 1))
+      kern(
+        s.w.toOpenArray(s.row0 * s.wStride, (s.row0 + s.rows) * s.wStride - 1),
+        s.sc.toOpenArray(s.row0 * s.sStride, (s.row0 + s.rows) * s.sStride - 1),
+        s.shape,
+        s.x.toOpenArray(0, s.k - 1),
+        s.y.toOpenArray(s.row0, s.row0 + s.rows - 1),
+      )
 
-    proc parName*(w: openArray[WT]; sc: openArray[ST]; shape: int;
-                  x: openArray[float32]; y: var openArray[float32];
-                  threads = 0) =
+    proc parName*(
+        w: openArray[WT],
+        sc: openArray[ST],
+        shape: int,
+        x: openArray[float32],
+        y: var openArray[float32],
+        threads = 0,
+    ) =
       let rows = y.len
       let k = x.len
       let nt = shardCount(rows, threads)
       if nt <= 1:
-        kern(w, sc, shape, x, y)          # not worth threading — stay serial
+        kern(w, sc, shape, x, y) # not worth threading — stay serial
         return
       let wStride = k div wPerElem
       let sStride = k div shape
       var thr = newSeq[Thread[Shard]](nt)
       let per = rows div nt
       for t in 0 ..< nt:
-        createThread(thr[t], workerName, Shard(
-          w: cast[ptr UncheckedArray[WT]](unsafeAddr w[0]),
-          sc: cast[ptr UncheckedArray[ST]](unsafeAddr sc[0]),
-          x: cast[ptr UncheckedArray[float32]](unsafeAddr x[0]),
-          y: cast[ptr UncheckedArray[float32]](addr y[0]),
-          row0: per * t,
-          rows: (if t == nt - 1: rows - per * t else: per),   # last shard takes the remainder
-          k: k, shape: shape, wStride: wStride, sStride: sStride))
+        createThread(
+          thr[t],
+          workerName,
+          Shard(
+            w: cast[ptr UncheckedArray[WT]](unsafeAddr w[0]),
+            sc: cast[ptr UncheckedArray[ST]](unsafeAddr sc[0]),
+            x: cast[ptr UncheckedArray[float32]](unsafeAddr x[0]),
+            y: cast[ptr UncheckedArray[float32]](addr y[0]),
+            row0: per * t,
+            rows: (if t == nt - 1: rows - per * t else: per),
+              # last shard takes the remainder
+            k: k,
+            shape: shape,
+            wStride: wStride,
+            sStride: sStride,
+          ),
+        )
       joinThreads(thr)
 
   # group-scale kernels: `shape` is groupSize, scales are (k div groupSize) per row
-  defParGemv(parDequantGemv,   shardWorkerI8, I8,   float32, dequantGemv,   1)  # one int8 per byte
-  defParGemv(parDequantGemvI4, shardWorkerI4, byte, float32, dequantGemvI4, 2)  # two nibbles per byte
-  defParGemv(parDequantGemvF4, shardWorkerF4, byte, float32, dequantGemvF4, 2)  # two fp4 per byte
+  defParGemv(parDequantGemv, shardWorkerI8, I8, float32, dequantGemv, 1)
+    # one int8 per byte
+  defParGemv(parDequantGemvI4, shardWorkerI4, byte, float32, dequantGemvI4, 2)
+    # two nibbles per byte
+  defParGemv(parDequantGemvF4, shardWorkerF4, byte, float32, dequantGemvF4, 2)
+    # two fp4 per byte
 
   template defParBlockGemv(parName, workerName, BT, kern: untyped) =
     ## The ggml block kernels: `shape` is blocksPerRow and the scale lives inside
@@ -232,14 +267,20 @@ when compileOption("threads"):
       row0, rows, k, bpr: int
 
     proc workerName(s: Shard) {.thread.} =
-      kern(s.w.toOpenArray(s.row0 * s.bpr, (s.row0 + s.rows) * s.bpr - 1),
-           s.bpr,
-           s.x.toOpenArray(0, s.k - 1),
-           s.y.toOpenArray(s.row0, s.row0 + s.rows - 1))
+      kern(
+        s.w.toOpenArray(s.row0 * s.bpr, (s.row0 + s.rows) * s.bpr - 1),
+        s.bpr,
+        s.x.toOpenArray(0, s.k - 1),
+        s.y.toOpenArray(s.row0, s.row0 + s.rows - 1),
+      )
 
-    proc parName*(w: openArray[BT]; blocksPerRow: int;
-                  x: openArray[float32]; y: var openArray[float32];
-                  threads = 0) =
+    proc parName*(
+        w: openArray[BT],
+        blocksPerRow: int,
+        x: openArray[float32],
+        y: var openArray[float32],
+        threads = 0,
+    ) =
       let rows = y.len
       let nt = shardCount(rows, threads)
       if nt <= 1:
@@ -248,19 +289,27 @@ when compileOption("threads"):
       var thr = newSeq[Thread[Shard]](nt)
       let per = rows div nt
       for t in 0 ..< nt:
-        createThread(thr[t], workerName, Shard(
-          w: cast[ptr UncheckedArray[BT]](unsafeAddr w[0]),
-          x: cast[ptr UncheckedArray[float32]](unsafeAddr x[0]),
-          y: cast[ptr UncheckedArray[float32]](addr y[0]),
-          row0: per * t,
-          rows: (if t == nt - 1: rows - per * t else: per),
-          k: x.len, bpr: blocksPerRow))
+        createThread(
+          thr[t],
+          workerName,
+          Shard(
+            w: cast[ptr UncheckedArray[BT]](unsafeAddr w[0]),
+            x: cast[ptr UncheckedArray[float32]](unsafeAddr x[0]),
+            y: cast[ptr UncheckedArray[float32]](addr y[0]),
+            row0: per * t,
+            rows: (if t == nt - 1: rows - per * t else: per),
+            k: x.len,
+            bpr: blocksPerRow,
+          ),
+        )
       joinThreads(thr)
 
   defParBlockGemv(parDequantGemvQ8_0, shardWorkerQ8_0, BlockQ8_0, dequantGemvQ8_0)
   defParBlockGemv(parDequantGemvQ4_0, shardWorkerQ4_0, BlockQ4_0, dequantGemvQ4_0)
 
-  template defParQ8Gemv(parName, workerName, trampolineName, WT, kern, wPerElem: untyped) =
+  template defParQ8Gemv(
+      parName, workerName, trampolineName, WT, kern, wPerElem: untyped
+  ) =
     ## The int8-ACTIVATION kernels: the activation vector and its scales are shared
     ## read-only by every shard (they are per-column, not per-row), so only the
     ## weights, weight scales and `y` get sliced.
@@ -272,27 +321,37 @@ when compileOption("threads"):
       row0, rows, k, gs, wStride, sStride: int
 
     proc workerName(s: Shard) {.thread.} =
-      kern(s.w.toOpenArray(s.row0 * s.wStride, (s.row0 + s.rows) * s.wStride - 1),
-           s.ws.toOpenArray(s.row0 * s.sStride, (s.row0 + s.rows) * s.sStride - 1),
-           s.gs,
-           s.xq.toOpenArray(0, s.k - 1),
-           s.xs.toOpenArray(0, s.sStride - 1),
-           s.y.toOpenArray(s.row0, s.row0 + s.rows - 1))
+      kern(
+        s.w.toOpenArray(s.row0 * s.wStride, (s.row0 + s.rows) * s.wStride - 1),
+        s.ws.toOpenArray(s.row0 * s.sStride, (s.row0 + s.rows) * s.sStride - 1),
+        s.gs,
+        s.xq.toOpenArray(0, s.k - 1),
+        s.xs.toOpenArray(0, s.sStride - 1),
+        s.y.toOpenArray(s.row0, s.row0 + s.rows - 1),
+      )
 
     # Same slicing, but the row range arrives from the pool instead of being baked
     # into the shard, so one descriptor serves every worker.
-    proc trampolineName(payload: pointer; row0, rows: int) {.nimcall, gcsafe.} =
+    proc trampolineName(payload: pointer, row0, rows: int) {.nimcall, gcsafe.} =
       let s = cast[ptr Shard](payload)
-      kern(s.w.toOpenArray(row0 * s.wStride, (row0 + rows) * s.wStride - 1),
-           s.ws.toOpenArray(row0 * s.sStride, (row0 + rows) * s.sStride - 1),
-           s.gs,
-           s.xq.toOpenArray(0, s.k - 1),
-           s.xs.toOpenArray(0, s.sStride - 1),
-           s.y.toOpenArray(row0, row0 + rows - 1))
+      kern(
+        s.w.toOpenArray(row0 * s.wStride, (row0 + rows) * s.wStride - 1),
+        s.ws.toOpenArray(row0 * s.sStride, (row0 + rows) * s.sStride - 1),
+        s.gs,
+        s.xq.toOpenArray(0, s.k - 1),
+        s.xs.toOpenArray(0, s.sStride - 1),
+        s.y.toOpenArray(row0, row0 + rows - 1),
+      )
 
-    proc parName*(pool: var LpPool; w: openArray[WT]; wScales: openArray[float32];
-                  groupSize: int; xq: openArray[I8]; xScales: openArray[float32];
-                  y: var openArray[float32]) =
+    proc parName*(
+        pool: var LpPool,
+        w: openArray[WT],
+        wScales: openArray[float32],
+        groupSize: int,
+        xq: openArray[I8],
+        xScales: openArray[float32],
+        y: var openArray[float32],
+    ) =
       ## Pooled form: no thread creation per call. Bit-identical to the serial kernel.
       let rows = y.len
       let k = xq.len
@@ -305,13 +364,24 @@ when compileOption("threads"):
         xs: cast[ptr UncheckedArray[float32]](unsafeAddr xScales[0]),
         xq: cast[ptr UncheckedArray[I8]](unsafeAddr xq[0]),
         y: cast[ptr UncheckedArray[float32]](addr y[0]),
-        row0: 0, rows: rows, k: k, gs: groupSize,
-        wStride: k div wPerElem, sStride: k div groupSize)
+        row0: 0,
+        rows: rows,
+        k: k,
+        gs: groupSize,
+        wStride: k div wPerElem,
+        sStride: k div groupSize,
+      )
       pool.dispatch(trampolineName, addr shard, rows)
 
-    proc parName*(w: openArray[WT]; wScales: openArray[float32]; groupSize: int;
-                  xq: openArray[I8]; xScales: openArray[float32];
-                  y: var openArray[float32]; threads = 0) =
+    proc parName*(
+        w: openArray[WT],
+        wScales: openArray[float32],
+        groupSize: int,
+        xq: openArray[I8],
+        xScales: openArray[float32],
+        y: var openArray[float32],
+        threads = 0,
+    ) =
       let rows = y.len
       let k = xq.len
       let nt = shardCount(rows, threads)
@@ -323,19 +393,29 @@ when compileOption("threads"):
       var thr = newSeq[Thread[Shard]](nt)
       let per = rows div nt
       for t in 0 ..< nt:
-        createThread(thr[t], workerName, Shard(
-          w: cast[ptr UncheckedArray[WT]](unsafeAddr w[0]),
-          ws: cast[ptr UncheckedArray[float32]](unsafeAddr wScales[0]),
-          xs: cast[ptr UncheckedArray[float32]](unsafeAddr xScales[0]),
-          xq: cast[ptr UncheckedArray[I8]](unsafeAddr xq[0]),
-          y: cast[ptr UncheckedArray[float32]](addr y[0]),
-          row0: per * t,
-          rows: (if t == nt - 1: rows - per * t else: per),
-          k: k, gs: groupSize, wStride: wStride, sStride: sStride))
+        createThread(
+          thr[t],
+          workerName,
+          Shard(
+            w: cast[ptr UncheckedArray[WT]](unsafeAddr w[0]),
+            ws: cast[ptr UncheckedArray[float32]](unsafeAddr wScales[0]),
+            xs: cast[ptr UncheckedArray[float32]](unsafeAddr xScales[0]),
+            xq: cast[ptr UncheckedArray[I8]](unsafeAddr xq[0]),
+            y: cast[ptr UncheckedArray[float32]](addr y[0]),
+            row0: per * t,
+            rows: (if t == nt - 1: rows - per * t else: per),
+            k: k,
+            gs: groupSize,
+            wStride: wStride,
+            sStride: sStride,
+          ),
+        )
       joinThreads(thr)
 
-  defParQ8Gemv(parDequantGemvQ8,   shardWorkerQ8i8, poolTrampQ8i8, I8,   dequantGemvQ8,   1)
-  defParQ8Gemv(parDequantGemvI4Q8, shardWorkerQ8i4, poolTrampQ8i4, byte, dequantGemvI4Q8, 2)
+  defParQ8Gemv(parDequantGemvQ8, shardWorkerQ8i8, poolTrampQ8i8, I8, dequantGemvQ8, 1)
+  defParQ8Gemv(
+    parDequantGemvI4Q8, shardWorkerQ8i4, poolTrampQ8i4, byte, dequantGemvI4Q8, 2
+  )
 
   template defParGemm(parName, trampName, WT, kern, wPerElem: untyped) =
     ## Row-sharded multi-column GEMM. `y` is M×n ROW-major, so a row range is one
@@ -347,18 +427,28 @@ when compileOption("threads"):
       y: ptr UncheckedArray[float32]
       k, gs, n, wStride, sStride: int
 
-    proc trampName(payload: pointer; row0, rows: int) {.nimcall, gcsafe.} =
+    proc trampName(payload: pointer, row0, rows: int) {.nimcall, gcsafe.} =
       let s = cast[ptr Shard](payload)
-      kern(s.w.toOpenArray(row0 * s.wStride, (row0 + rows) * s.wStride - 1),
-           s.ws.toOpenArray(row0 * s.sStride, (row0 + rows) * s.sStride - 1),
-           s.gs,
-           s.xq.toOpenArray(0, s.n * s.k - 1),
-           s.xs.toOpenArray(0, s.n * s.sStride - 1), s.n,
-           s.y.toOpenArray(row0 * s.n, (row0 + rows) * s.n - 1))
+      kern(
+        s.w.toOpenArray(row0 * s.wStride, (row0 + rows) * s.wStride - 1),
+        s.ws.toOpenArray(row0 * s.sStride, (row0 + rows) * s.sStride - 1),
+        s.gs,
+        s.xq.toOpenArray(0, s.n * s.k - 1),
+        s.xs.toOpenArray(0, s.n * s.sStride - 1),
+        s.n,
+        s.y.toOpenArray(row0 * s.n, (row0 + rows) * s.n - 1),
+      )
 
-    proc parName*(pool: var LpPool; w: openArray[WT]; wScales: openArray[float32];
-                  groupSize: int; xq: openArray[I8]; xScales: openArray[float32];
-                  n: int; y: var openArray[float32]) =
+    proc parName*(
+        pool: var LpPool,
+        w: openArray[WT],
+        wScales: openArray[float32],
+        groupSize: int,
+        xq: openArray[I8],
+        xScales: openArray[float32],
+        n: int,
+        y: var openArray[float32],
+    ) =
       ## Pooled multi-column GEMM — the 8-thread n=8 int8 configuration measured
       ## 564 GFLOP/s on an M1 Pro. Bit-identical per column to the serial kernel.
       let rows = y.len div n
@@ -372,53 +462,108 @@ when compileOption("threads"):
         xs: cast[ptr UncheckedArray[float32]](unsafeAddr xScales[0]),
         xq: cast[ptr UncheckedArray[I8]](unsafeAddr xq[0]),
         y: cast[ptr UncheckedArray[float32]](addr y[0]),
-        k: k, gs: groupSize, n: n,
-        wStride: k div wPerElem, sStride: k div groupSize)
+        k: k,
+        gs: groupSize,
+        n: n,
+        wStride: k div wPerElem,
+        sStride: k div groupSize,
+      )
       pool.dispatch(trampName, addr shard, rows)
 
-  defParGemm(parDequantGemmQ8,   poolTrampGemmQ8, I8,   dequantGemmQ8,   1)
+  defParGemm(parDequantGemmQ8, poolTrampGemmQ8, I8, dequantGemmQ8, 1)
   defParGemm(parDequantGemmI4Q8, poolTrampGemmI4, byte, dequantGemmI4Q8, 2)
-
 else:
   # Built without --threads:on: the parallel names still exist and still compute
   # the right answer, so callers don't need their own `when` guards.
-  proc parDequantGemv*(wq: openArray[I8]; scales: openArray[float32]; groupSize: int;
-                       x: openArray[float32]; y: var openArray[float32]; threads = 0) =
+  proc parDequantGemv*(
+      wq: openArray[I8],
+      scales: openArray[float32],
+      groupSize: int,
+      x: openArray[float32],
+      y: var openArray[float32],
+      threads = 0,
+  ) =
     dequantGemv(wq, scales, groupSize, x, y)
 
-  proc parDequantGemvI4*(w: openArray[byte]; scales: openArray[float32]; groupSize: int;
-                         x: openArray[float32]; y: var openArray[float32]; threads = 0) =
+  proc parDequantGemvI4*(
+      w: openArray[byte],
+      scales: openArray[float32],
+      groupSize: int,
+      x: openArray[float32],
+      y: var openArray[float32],
+      threads = 0,
+  ) =
     dequantGemvI4(w, scales, groupSize, x, y)
 
-  proc parDequantGemvF4*(w: openArray[byte]; scales: openArray[float32]; groupSize: int;
-                         x: openArray[float32]; y: var openArray[float32]; threads = 0) =
+  proc parDequantGemvF4*(
+      w: openArray[byte],
+      scales: openArray[float32],
+      groupSize: int,
+      x: openArray[float32],
+      y: var openArray[float32],
+      threads = 0,
+  ) =
     dequantGemvF4(w, scales, groupSize, x, y)
 
-  proc parDequantGemvQ8_0*(w: openArray[BlockQ8_0]; blocksPerRow: int;
-                           x: openArray[float32]; y: var openArray[float32]; threads = 0) =
+  proc parDequantGemvQ8_0*(
+      w: openArray[BlockQ8_0],
+      blocksPerRow: int,
+      x: openArray[float32],
+      y: var openArray[float32],
+      threads = 0,
+  ) =
     dequantGemvQ8_0(w, blocksPerRow, x, y)
 
-  proc parDequantGemvQ4_0*(w: openArray[BlockQ4_0]; blocksPerRow: int;
-                           x: openArray[float32]; y: var openArray[float32]; threads = 0) =
+  proc parDequantGemvQ4_0*(
+      w: openArray[BlockQ4_0],
+      blocksPerRow: int,
+      x: openArray[float32],
+      y: var openArray[float32],
+      threads = 0,
+  ) =
     dequantGemvQ4_0(w, blocksPerRow, x, y)
 
-  proc parDequantGemvQ8*(w: openArray[I8]; wScales: openArray[float32]; groupSize: int;
-                         xq: openArray[I8]; xScales: openArray[float32];
-                         y: var openArray[float32]; threads = 0) =
+  proc parDequantGemvQ8*(
+      w: openArray[I8],
+      wScales: openArray[float32],
+      groupSize: int,
+      xq: openArray[I8],
+      xScales: openArray[float32],
+      y: var openArray[float32],
+      threads = 0,
+  ) =
     dequantGemvQ8(w, wScales, groupSize, xq, xScales, y)
 
-  proc parDequantGemvI4Q8*(w: openArray[byte]; wScales: openArray[float32]; groupSize: int;
-                           xq: openArray[I8]; xScales: openArray[float32];
-                           y: var openArray[float32]; threads = 0) =
+  proc parDequantGemvI4Q8*(
+      w: openArray[byte],
+      wScales: openArray[float32],
+      groupSize: int,
+      xq: openArray[I8],
+      xScales: openArray[float32],
+      y: var openArray[float32],
+      threads = 0,
+  ) =
     dequantGemvI4Q8(w, wScales, groupSize, xq, xScales, y)
 
   # --threads:off builds still get the GEMM names (serial), pool type absent.
-  proc parDequantGemmQ8*(w: openArray[I8]; wScales: openArray[float32]; groupSize: int;
-                         xq: openArray[I8]; xScales: openArray[float32]; n: int;
-                         y: var openArray[float32]) =
+  proc parDequantGemmQ8*(
+      w: openArray[I8],
+      wScales: openArray[float32],
+      groupSize: int,
+      xq: openArray[I8],
+      xScales: openArray[float32],
+      n: int,
+      y: var openArray[float32],
+  ) =
     dequantGemmQ8(w, wScales, groupSize, xq, xScales, n, y)
 
-  proc parDequantGemmI4Q8*(w: openArray[byte]; wScales: openArray[float32]; groupSize: int;
-                           xq: openArray[I8]; xScales: openArray[float32]; n: int;
-                           y: var openArray[float32]) =
+  proc parDequantGemmI4Q8*(
+      w: openArray[byte],
+      wScales: openArray[float32],
+      groupSize: int,
+      xq: openArray[I8],
+      xScales: openArray[float32],
+      n: int,
+      y: var openArray[float32],
+  ) =
     dequantGemmI4Q8(w, wScales, groupSize, xq, xScales, n, y)

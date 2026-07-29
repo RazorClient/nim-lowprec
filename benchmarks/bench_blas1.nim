@@ -34,14 +34,17 @@ for n in [4_096, 16_000_000]:
   # 4-lane one by more than rounding-at-the-end would suggest. Bounding the
   # divergence is the tests' job (`tests/test_blas1_simd.nim`); here it only has
   # to prove both paths computed the same dot product.
-  var g = flopGroup("bf16 dot  (x" & $reps & ")", "N = " & $n,
-                    2.0 * n.float * reps.float, tol = 1e-3)
+  var g = flopGroup(
+    "bf16 dot  (x" & $reps & ")", "N = " & $n, 2.0 * n.float * reps.float, tol = 1e-3
+  )
   g.scalarRow acc:
     acc = 0.0'f32
-    for _ in 1 .. reps: acc += dot(a, b)
+    for _ in 1 .. reps:
+      acc += dot(a, b)
   g.kernelRow acc:
     acc = 0.0'f32
-    for _ in 1 .. reps: acc += dotBf16(a, b)
+    for _ in 1 .. reps:
+      acc += dotBf16(a, b)
   g.report()
 
   # fp16 sibling: hardware widen straight into the same FMA shape
@@ -50,12 +53,15 @@ for n in [4_096, 16_000_000]:
   for i in 0 ..< n:
     ah[i] = toF16(toFloat32(a[i]))
     bh[i] = toF16(toFloat32(b[i]))
-  var h = flopGroup("fp16 dot  (x" & $reps & ")", "N = " & $n,
-                    2.0 * n.float * reps.float, tol = 1e-3)
+  var h = flopGroup(
+    "fp16 dot  (x" & $reps & ")", "N = " & $n, 2.0 * n.float * reps.float, tol = 1e-3
+  )
   h.scalarRow acc:
     acc = 0.0'f32
-    for _ in 1 .. reps: acc += dot(ah, bh)
+    for _ in 1 .. reps:
+      acc += dot(ah, bh)
   h.kernelRow acc:
     acc = 0.0'f32
-    for _ in 1 .. reps: acc += dotF16(ah, bh)
+    for _ in 1 .. reps:
+      acc += dotF16(ah, bh)
   h.report()

@@ -8,9 +8,9 @@ suite "I8":
   test "integer round-trip, clamp, rounding":
     for v in -128 .. 127:
       check toI8(float32(v)).toFloat32 == float32(v)
-    check toI8(200.0'f32).toFloat32 == 127.0'f32        # clamp high
-    check toI8(-200.0'f32).toFloat32 == -128.0'f32      # clamp low
-    check toI8(2.6'f32).toFloat32 == 3.0'f32            # round
+    check toI8(200.0'f32).toFloat32 == 127.0'f32 # clamp high
+    check toI8(-200.0'f32).toFloat32 == -128.0'f32 # clamp low
+    check toI8(2.6'f32).toFloat32 == 3.0'f32 # round
     check toI8(-2.6'f32).toFloat32 == -3.0'f32
 
 suite "I4":
@@ -19,24 +19,25 @@ suite "I4":
       check toI4(float32(v)).toFloat32 == float32(v)
     check nibble(toI4(-8.0'f32)) == 0x8'u8
     check nibble(toI4(-1.0'f32)) == 0xf'u8
-    check nibble(toI4(7.0'f32))  == 0x7'u8
-    check nibble(toI4(0.0'f32))  == 0x0'u8
+    check nibble(toI4(7.0'f32)) == 0x7'u8
+    check nibble(toI4(0.0'f32)) == 0x0'u8
     check fromNibble(0x8'u8).toFloat32 == -8.0'f32
     check fromNibble(0xf'u8).toFloat32 == -1.0'f32
 
   test "clamp and round":
-    check toI4(100.0'f32).toFloat32  == 7.0'f32
+    check toI4(100.0'f32).toFloat32 == 7.0'f32
     check toI4(-100.0'f32).toFloat32 == -8.0'f32
-    check toI4(2.6'f32).toFloat32    == 3.0'f32
+    check toI4(2.6'f32).toFloat32 == 3.0'f32
 
   test "packInt4 layout (ggml low-nibble-first)":
     var packed = newSeq[byte](1)
-    packInt4([toI4(3.0'f32), toI4(-2.0'f32)], packed)   # low=3(0x3), high=-2(0xE) → 0xE3
+    packInt4([toI4(3.0'f32), toI4(-2.0'f32)], packed) # low=3(0x3), high=-2(0xE) → 0xE3
     check packed[0] == 0xE3'u8
 
   test "packInt4 / unpackInt4 round-trip (all 16 values)":
     var vals: seq[I4]
-    for v in -8 .. 7: vals.add toI4(float32(v))
+    for v in -8 .. 7:
+      vals.add toI4(float32(v))
     var pk = newSeq[byte]((vals.len + 1) div 2)
     packInt4(vals, pk)
     var back = newSeq[I4](vals.len)
@@ -51,11 +52,12 @@ suite "I4":
 
 suite "I1 (sign bit)":
   test "sign semantics":
-    check toI1(3.0'f32).toFloat32  == 1.0'f32
+    check toI1(3.0'f32).toFloat32 == 1.0'f32
     check toI1(-3.0'f32).toFloat32 == -1.0'f32
 
   test "packInt1 layout (LSB-first) + round-trip":
-    let signs = [toI1(1.0'f32), toI1(-1.0'f32), toI1(-1.0'f32), toI1(1.0'f32)]  # +,-,-,+ → 0b0110
+    let signs = [toI1(1.0'f32), toI1(-1.0'f32), toI1(-1.0'f32), toI1(1.0'f32)]
+      # +,-,-,+ → 0b0110
     var pk = newSeq[byte](1)
     packInt1(signs, pk)
     check pk[0] == 0x06'u8

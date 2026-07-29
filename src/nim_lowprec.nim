@@ -15,5 +15,6 @@ import nim_lowprec/simd/blas1
 import nim_lowprec/nvfp4
 import nim_lowprec/parallel
 
-export dtypes, common, bfloat16, float16, float8, mxfloat, intx, reduce, quant, interop,
-       ggml, nvfp4, convert, dequant, blas1, parallel
+export
+  dtypes, common, bfloat16, float16, float8, mxfloat, intx, reduce, quant, interop,
+  ggml, nvfp4, convert, dequant, blas1, parallel

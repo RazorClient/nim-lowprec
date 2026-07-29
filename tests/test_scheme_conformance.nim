@@ -24,26 +24,31 @@ const here = currentSourcePath().parentDir
 
 proc readBytes(name: string): seq[byte] =
   let path = here / name
-  if not fileExists(path): return @[]
+  if not fileExists(path):
+    return @[]
   result = newSeq[byte](getFileSize(path))
   let f = open(path)
-  defer: f.close()
+  defer:
+    f.close()
   discard f.readBuffer(addr result[0], result.len)
 
 proc readF32(name: string): seq[float32] =
   let raw = readBytes(name)
   result = newSeq[float32](raw.len div 4)
-  if raw.len > 0: copyMem(addr result[0], unsafeAddr raw[0], raw.len)
+  if raw.len > 0:
+    copyMem(addr result[0], unsafeAddr raw[0], raw.len)
 
-template bitEq(got, want: openArray[float32]; mism: var int) =
+template bitEq(got, want: openArray[float32], mism: var int) =
   for i in 0 ..< want.len:
-    if cast[uint32](got[i]) != cast[uint32](want[i]): inc mism
+    if cast[uint32](got[i]) != cast[uint32](want[i]):
+      inc mism
 
 suite "ggml Q8_0/Q4_0 vs gguf-py (external oracle)":
   let x = readF32("ref_scheme_input.bin")
 
   test "Q8_0 quantize bytes + dequant, bit-exact":
-    if x.len == 0: skip()
+    if x.len == 0:
+      skip()
     else:
       let wantBytes = readBytes("ref_ggml_q8_0_bytes.bin")
       let wantDq = readF32("ref_ggml_q8_0_dq.bin")
@@ -62,7 +67,8 @@ suite "ggml Q8_0/Q4_0 vs gguf-py (external oracle)":
       check mism == 0
 
   test "Q4_0 quantize bytes + dequant, bit-exact":
-    if x.len == 0: skip()
+    if x.len == 0:
+      skip()
     else:
       let wantBytes = readBytes("ref_ggml_q4_0_bytes.bin")
       let wantDq = readF32("ref_ggml_q4_0_dq.bin")
@@ -82,7 +88,8 @@ suite "ggml Q8_0/Q4_0 vs gguf-py (external oracle)":
 suite "ggml k-quants (Q4_K/Q6_K) dequant vs gguf-py":
   test "Q4_K super-block dequant, bit-exact":
     let raw = readBytes("ref_ggml_q4_k_bytes.bin")
-    if raw.len == 0: skip()
+    if raw.len == 0:
+      skip()
     else:
       let want = readF32("ref_ggml_q4_k_dq.bin")
       var blocks = newSeq[BlockQ4_K](raw.len div sizeof(BlockQ4_K))
@@ -95,7 +102,8 @@ suite "ggml k-quants (Q4_K/Q6_K) dequant vs gguf-py":
 
   test "Q6_K super-block dequant, bit-exact":
     let raw = readBytes("ref_ggml_q6_k_bytes.bin")
-    if raw.len == 0: skip()
+    if raw.len == 0:
+      skip()
     else:
       let want = readF32("ref_ggml_q6_k_dq.bin")
       var blocks = newSeq[BlockQ6_K](raw.len div sizeof(BlockQ6_K))
@@ -106,11 +114,14 @@ suite "ggml k-quants (Q4_K/Q6_K) dequant vs gguf-py":
       bitEq(dq, want, mism)
       check mism == 0
 
-template mxSchemeTest(TT: untyped; refFile: static string; emax: int; nm: static string) =
+template mxSchemeTest(
+    TT: untyped, refFile: static string, emax: int, nm: static string
+) =
   test nm:
     let x = readF32("ref_mx_input.bin")
     let want = readF32(refFile)
-    if x.len == 0 or want.len == 0: skip()
+    if x.len == 0 or want.len == 0:
+      skip()
     else:
       let p = calibrateMX(x, 32, emax)
       var q = newSeq[TT](x.len)
@@ -132,7 +143,8 @@ suite "NVFP4 vs TransformerEngine NVFP4QuantizerRef":
   test "codes + e4m3 block scales + global scale, bit-exact":
     let x = readF32("ref_nvfp4_input.bin")
     let golden = readBytes("ref_nvfp4_out.bin")
-    if x.len == 0 or golden.len == 0: skip()
+    if x.len == 0 or golden.len == 0:
+      skip()
     else:
       let nb = x.len div nvfp4BlockLen
       var wantGds: float32
@@ -143,14 +155,17 @@ suite "NVFP4 vs TransformerEngine NVFP4QuantizerRef":
       check cast[uint32](gds) == cast[uint32](wantGds)
       var mism = 0
       for b in 0 ..< nb:
-        if uint8(scales[b]) != uint8(golden[4 + b]): inc mism
+        if uint8(scales[b]) != uint8(golden[4 + b]):
+          inc mism
       for i in 0 ..< x.len:
-        if (bits(codes[i]) and 0x0f'u8) != uint8(golden[4 + nb + i]): inc mism
+        if (bits(codes[i]) and 0x0f'u8) != uint8(golden[4 + nb + i]):
+          inc mism
       check mism == 0
 
   test "round-trip through the documented dequant order":
     let x = readF32("ref_nvfp4_input.bin")
-    if x.len == 0: skip()
+    if x.len == 0:
+      skip()
     else:
       var codes = newSeq[F4E2M1](x.len)
       var scales = newSeq[F8E4M3](x.len div nvfp4BlockLen)
@@ -168,11 +183,13 @@ suite "NVFP4 vs TransformerEngine NVFP4QuantizerRef":
         # input spans 2^40 to exercise exactly these paths, and the oracle
         # test above proves we reproduce TE bit-for-bit on them. The tight
         # error bound only applies where the block scale is a NORMAL e4m3.
-        if (uint8(scales[b]) and 0x78'u8) == 0'u8: continue
+        if (uint8(scales[b]) and 0x78'u8) == 0'u8:
+          continue
         var vmax = 0.0'f32
         for i in b * nvfp4BlockLen ..< (b + 1) * nvfp4BlockLen:
           vmax = max(vmax, abs(x[i]))
-        if vmax == 0.0'f32: continue
+        if vmax == 0.0'f32:
+          continue
         for i in b * nvfp4BlockLen ..< (b + 1) * nvfp4BlockLen:
           worst = max(worst, abs(dq[i].float64 - x[i].float64) / vmax.float64)
       check worst < 0.20
@@ -189,8 +206,9 @@ suite "MXINT8 (named recipe: calibrateMX + I8)":
     var u = 31337'u32
     for i in 0 ..< x.len:
       u = u * 1664525'u32 + 1013904223'u32
-      x[i] = (float32(u shr 8) / float32(1'u32 shl 24) - 0.5'f32) *
-             pow(2.0'f32, float32(int(u shr 28) and 15) - 8.0'f32)
+      x[i] =
+        (float32(u shr 8) / float32(1'u32 shl 24) - 0.5'f32) *
+        pow(2.0'f32, float32(int(u shr 28) and 15) - 8.0'f32)
     let p = calibrateMX(x, 32, elemEmax = 6)
     var q = newSeq[I8](x.len)
     quantize(x, p, q)
@@ -208,5 +226,5 @@ suite "MXINT8 (named recipe: calibrateMX + I8)":
         # clamps to 127 — error up to (but below) one full step there.
         ok = ok and abs(dq[i] - x[i]) < p.scale[b]
       if amax > 0:
-        ok = ok and qmax >= 64 and qmax <= 127   # amax in the top octave
+        ok = ok and qmax >= 64 and qmax <= 127 # amax in the top octave
     check ok

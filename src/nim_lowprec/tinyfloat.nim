@@ -17,11 +17,11 @@ func tinyMag*(c, ebits, mbits, bias: int): float64 =
   let ef = (c shr mbits) and ((1 shl ebits) - 1)
   let mf = c and ((1 shl mbits) - 1)
   if ef == 0:
-    float64(mf) * pow2(1 - bias - mbits)                   # subnormal (0 if mf==0)
+    float64(mf) * pow2(1 - bias - mbits) # subnormal (0 if mf==0)
   else:
-    float64((1 shl mbits) + mf) * pow2(ef - bias - mbits)  # normal
+    float64((1 shl mbits) + mf) * pow2(ef - bias - mbits) # normal
 
-func nearestCode*(a: float64; ebits, mbits, bias, cmax: int): int =
+func nearestCode*(a: float64, ebits, mbits, bias, cmax: int): int =
   ## Code in [0, cmax] whose magnitude is nearest `a` (with 0 ≤ a < mag(cmax)),
   ## round-to-nearest-even. The caller applies the sign and handles the zero
   ## code plus the overflow / NaN / Inf / saturation edges.
@@ -29,12 +29,18 @@ func nearestCode*(a: float64; ebits, mbits, bias, cmax: int): int =
   var hi = cmax
   while lo < hi:
     let m = (lo + hi) div 2
-    if tinyMag(m, ebits, mbits, bias) >= a: hi = m
-    else: lo = m + 1
+    if tinyMag(m, ebits, mbits, bias) >= a:
+      hi = m
+    else:
+      lo = m + 1
   let cHi = hi
-  if cHi == 0: return 0
+  if cHi == 0:
+    return 0
   let cLo = cHi - 1
   let midv = (tinyMag(cLo, ebits, mbits, bias) + tinyMag(cHi, ebits, mbits, bias)) * 0.5
-  if a < midv: cLo
-  elif a > midv: cHi
-  else: (if (cLo and 1) == 0: cLo else: cHi)               # tie → even
+  if a < midv:
+    cLo
+  elif a > midv:
+    cHi
+  else:
+    (if (cLo and 1) == 0: cLo else: cHi) # tie → even

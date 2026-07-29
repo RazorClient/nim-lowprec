@@ -18,17 +18,19 @@ when defined(amd64) or defined(i386):
   type
     m128i* {.importc: "__m128i", bycopy.} = object
     m256i* {.importc: "__m256i", bycopy.} = object
-    m256*  {.importc: "__m256",  bycopy.} = object
-    m128*  {.importc: "__m128",  bycopy.} = object
+    m256* {.importc: "__m256", bycopy.} = object
+    m128* {.importc: "__m128", bycopy.} = object
 
   # ---- loads / stores ----
   proc mm_loadu_si128*(p: ptr m128i): m128i {.importc: "_mm_loadu_si128".}
-  proc mm_storeu_si128*(p: ptr m128i; a: m128i) {.importc: "_mm_storeu_si128".}
-  proc mm_storel_epi64*(p: ptr m128i; a: m128i) {.importc: "_mm_storel_epi64".}
-  proc mm_loadl_epi64*(p: ptr m128i): m128i {.importc: "_mm_loadl_epi64".}   # 8 bytes → low 64
+  proc mm_storeu_si128*(p: ptr m128i, a: m128i) {.importc: "_mm_storeu_si128".}
+  proc mm_storel_epi64*(p: ptr m128i, a: m128i) {.importc: "_mm_storel_epi64".}
+  proc mm_loadl_epi64*(p: ptr m128i): m128i {.importc: "_mm_loadl_epi64".}
+    # 8 bytes → low 64
+
   proc mm_loadu_ps*(p: ptr float32): m128 {.importc: "_mm_loadu_ps".}
   proc mm256_loadu_ps*(p: ptr float32): m256 {.importc: "_mm256_loadu_ps".}
-  proc mm256_storeu_ps*(p: ptr float32; a: m256) {.importc: "_mm256_storeu_ps".}
+  proc mm256_storeu_ps*(p: ptr float32, a: m256) {.importc: "_mm256_storeu_ps".}
 
   # ---- set / broadcast ----
   proc mm_cvtsi32_si128*(a: cint): m128i {.importc: "_mm_cvtsi32_si128".}
@@ -39,26 +41,37 @@ when defined(amd64) or defined(i386):
   proc mm256_setzero_ps*(): m256 {.importc: "_mm256_setzero_ps".}
 
   # ---- F16C convert (fp16 <-> fp32) ----
-  proc mm256_cvtph_ps*(a: m128i): m256 {.importc: "_mm256_cvtph_ps".}         # 8×fp16 -> 8×fp32
-  proc mm256_cvtps_ph*(a: m256; rounding: cint): m128i {.importc: "_mm256_cvtps_ph".}  # 8×fp32 -> 8×fp16
+  proc mm256_cvtph_ps*(a: m128i): m256 {.importc: "_mm256_cvtph_ps".}
+    # 8×fp16 -> 8×fp32
+
+  proc mm256_cvtps_ph*(a: m256, rounding: cint): m128i {.importc: "_mm256_cvtps_ph".}
+    # 8×fp32 -> 8×fp16
 
   # ---- widen / float convert ----
-  proc mm256_cvtepu16_epi32*(a: m128i): m256i {.importc: "_mm256_cvtepu16_epi32".}  # 8×u16 -> 8×u32 (zero-ext)
-  proc mm256_cvtepi8_epi32*(a: m128i): m256i {.importc: "_mm256_cvtepi8_epi32".}    # 8×i8  -> 8×i32 (sign-ext)
+  proc mm256_cvtepu16_epi32*(a: m128i): m256i {.importc: "_mm256_cvtepu16_epi32".}
+    # 8×u16 -> 8×u32 (zero-ext)
+
+  proc mm256_cvtepi8_epi32*(a: m128i): m256i {.importc: "_mm256_cvtepi8_epi32".}
+    # 8×i8  -> 8×i32 (sign-ext)
+
   proc mm256_cvtepi32_ps*(a: m256i): m256 {.importc: "_mm256_cvtepi32_ps".}
-  proc mm_cvtepu8_epi16*(a: m128i): m128i {.importc: "_mm_cvtepu8_epi16".}   # 8×u8 -> 8×u16 (zero-ext)
+  proc mm_cvtepu8_epi16*(a: m128i): m128i {.importc: "_mm_cvtepu8_epi16".}
+    # 8×u8 -> 8×u16 (zero-ext)
 
   # ---- arithmetic ----
   proc mm256_mul_ps*(a, b: m256): m256 {.importc: "_mm256_mul_ps".}
-  proc mm256_fmadd_ps*(a, b, c: m256): m256 {.importc: "_mm256_fmadd_ps".}     # a*b + c  (FMA)
-  proc mm256_add_ps*(a, b: m256): m256 {.importc: "_mm256_add_ps".}            # lanewise add (folding accumulators)
+  proc mm256_fmadd_ps*(a, b, c: m256): m256 {.importc: "_mm256_fmadd_ps".}
+    # a*b + c  (FMA)
+
+  proc mm256_add_ps*(a, b: m256): m256 {.importc: "_mm256_add_ps".}
+    # lanewise add (folding accumulators)
 
   # ---- int8 dot-product building blocks (the AVX2 stand-in for ARM SDOT) ----
   # x86 has no signed×signed int8 dot; the standard construction (ggml uses the
   # same) is abs/sign + maddubs (u8×s8 -> pairwise i16; |a|≤128, |b|≤127, so the
   # i16 saturation bound 32767 cannot be hit: 128·127·2 = 32512) + madd(1) to i32.
   proc mm256_loadu_si256*(p: ptr m256i): m256i {.importc: "_mm256_loadu_si256".}
-  proc mm256_storeu_si256*(p: ptr m256i; a: m256i) {.importc: "_mm256_storeu_si256".}
+  proc mm256_storeu_si256*(p: ptr m256i, a: m256i) {.importc: "_mm256_storeu_si256".}
   proc mm256_setzero_si256*(): m256i {.importc: "_mm256_setzero_si256".}
   proc mm256_sign_epi8*(a, b: m256i): m256i {.importc: "_mm256_sign_epi8".}
   proc mm256_maddubs_epi16*(a, b: m256i): m256i {.importc: "_mm256_maddubs_epi16".}
@@ -69,7 +82,7 @@ when defined(amd64) or defined(i386):
   proc mm256_and_si256*(a, b: m256i): m256i {.importc: "_mm256_and_si256".}
   proc mm256_xor_si256*(a, b: m256i): m256i {.importc: "_mm256_xor_si256".}
   proc mm256_sub_epi8*(a, b: m256i): m256i {.importc: "_mm256_sub_epi8".}
-  proc mm256_srli_epi16*(a: m256i; imm: cint): m256i {.importc: "_mm256_srli_epi16".}
+  proc mm256_srli_epi16*(a: m256i, imm: cint): m256i {.importc: "_mm256_srli_epi16".}
   proc mm256_unpacklo_epi8*(a, b: m256i): m256i {.importc: "_mm256_unpacklo_epi8".}
   proc mm256_unpackhi_epi8*(a, b: m256i): m256i {.importc: "_mm256_unpackhi_epi8".}
   proc mm256_set_m128i*(hi, lo: m128i): m256i {.importc: "_mm256_set_m128i".}
@@ -89,7 +102,7 @@ when defined(amd64) or defined(i386):
   proc mm_srl_epi32*(a, count: m128i): m128i {.importc: "_mm_srl_epi32".}
   proc mm_srl_epi16*(a, count: m128i): m128i {.importc: "_mm_srl_epi16".}
   proc mm_sll_epi16*(a, count: m128i): m128i {.importc: "_mm_sll_epi16".}
-  proc mm256_sll_epi32*(a: m256i; count: m128i): m256i {.importc: "_mm256_sll_epi32".}
+  proc mm256_sll_epi32*(a: m256i, count: m128i): m256i {.importc: "_mm256_sll_epi32".}
 
   # ---- shuffle / interleave / cast / extract ----
   proc mm_shuffle_epi8*(a, b: m128i): m128i {.importc: "_mm_shuffle_epi8".}
@@ -99,7 +112,10 @@ when defined(amd64) or defined(i386):
   proc mm_castps_si128*(a: m128): m128i {.importc: "_mm_castps_si128".}
   proc mm256_castsi256_ps*(a: m256i): m256 {.importc: "_mm256_castsi256_ps".}
   proc mm256_castps256_ps128*(a: m256): m128 {.importc: "_mm256_castps256_ps128".}
-  proc mm256_extractf128_ps*(a: m256; imm: cint): m128 {.importc: "_mm256_extractf128_ps".}
+  proc mm256_extractf128_ps*(
+    a: m256, imm: cint
+  ): m128 {.importc: "_mm256_extractf128_ps".}
+
   proc mm_cvtss_f32*(a: m128): cfloat {.importc: "_mm_cvtss_f32".}
 
   {.pop.}
@@ -119,7 +135,7 @@ when defined(amd64) or defined(i386):
   proc hsum256*(v: m256): float32 {.inline.} =
     let lo = mm256_castps256_ps128(v)
     let hi = mm256_extractf128_ps(v, 1)
-    var s = mm_add_ps(lo, hi)          # 4 partial sums
-    s = mm_hadd_ps(s, s)               # 2
-    s = mm_hadd_ps(s, s)               # 1
+    var s = mm_add_ps(lo, hi) # 4 partial sums
+    s = mm_hadd_ps(s, s) # 2
+    s = mm_hadd_ps(s, s) # 1
     float32(mm_cvtss_f32(s))

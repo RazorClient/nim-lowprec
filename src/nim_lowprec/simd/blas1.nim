@@ -9,8 +9,10 @@
 import ../bfloat16
 import ../float16
 import ./target
-when lpUseNeon: import ./neon
-when lpUseAvx2: import ./x86
+when lpUseNeon:
+  import ./neon
+when lpUseAvx2:
+  import ./x86
 
 # The kernels below run with bounds/overflow checks OFF regardless of build mode.
 #
@@ -41,40 +43,51 @@ proc dotBf16*(a, b: openArray[BF16]): float32 =
     while i + 8 <= n:
       let av = vld1q_u16(cast[ptr uint16](unsafeAddr a[i]))
       let bv = vld1q_u16(cast[ptr uint16](unsafeAddr b[i]))
-      acc0 = vfmaq_f32(acc0,
+      acc0 = vfmaq_f32(
+        acc0,
         vreinterpretq_f32_u32(vshlq_u32(vmovl_u16(vget_low_u16(av)), sh16)),
-        vreinterpretq_f32_u32(vshlq_u32(vmovl_u16(vget_low_u16(bv)), sh16)))
-      acc1 = vfmaq_f32(acc1,
+        vreinterpretq_f32_u32(vshlq_u32(vmovl_u16(vget_low_u16(bv)), sh16)),
+      )
+      acc1 = vfmaq_f32(
+        acc1,
         vreinterpretq_f32_u32(vshlq_u32(vmovl_u16(vget_high_u16(av)), sh16)),
-        vreinterpretq_f32_u32(vshlq_u32(vmovl_u16(vget_high_u16(bv)), sh16)))
+        vreinterpretq_f32_u32(vshlq_u32(vmovl_u16(vget_high_u16(bv)), sh16)),
+      )
       i += 8
     result = vaddvq_f32(vaddq_f32(acc0, acc1))
   elif lpUseAvx2:
     let sh16 = mm_cvtsi32_si128(16.cint)
     var acc0 = mm256_setzero_ps()
     var acc1 = mm256_setzero_ps()
-    while i + 16 <= n:                             # 2×8 lanes, one per accumulator
+    while i + 16 <= n: # 2×8 lanes, one per accumulator
       let av0 = mm_loadu_si128(cast[ptr m128i](unsafeAddr a[i]))
       let bv0 = mm_loadu_si128(cast[ptr m128i](unsafeAddr b[i]))
       let av1 = mm_loadu_si128(cast[ptr m128i](unsafeAddr a[i + 8]))
       let bv1 = mm_loadu_si128(cast[ptr m128i](unsafeAddr b[i + 8]))
       acc0 = mm256_fmadd_ps(
         mm256_castsi256_ps(mm256_sll_epi32(mm256_cvtepu16_epi32(av0), sh16)),
-        mm256_castsi256_ps(mm256_sll_epi32(mm256_cvtepu16_epi32(bv0), sh16)), acc0)
+        mm256_castsi256_ps(mm256_sll_epi32(mm256_cvtepu16_epi32(bv0), sh16)),
+        acc0,
+      )
       acc1 = mm256_fmadd_ps(
         mm256_castsi256_ps(mm256_sll_epi32(mm256_cvtepu16_epi32(av1), sh16)),
-        mm256_castsi256_ps(mm256_sll_epi32(mm256_cvtepu16_epi32(bv1), sh16)), acc1)
+        mm256_castsi256_ps(mm256_sll_epi32(mm256_cvtepu16_epi32(bv1), sh16)),
+        acc1,
+      )
       i += 16
-    while i + 8 <= n:                              # odd 8-lane block, if any
+    while i + 8 <= n: # odd 8-lane block, if any
       let av = mm_loadu_si128(cast[ptr m128i](unsafeAddr a[i]))
       let bv = mm_loadu_si128(cast[ptr m128i](unsafeAddr b[i]))
       acc0 = mm256_fmadd_ps(
         mm256_castsi256_ps(mm256_sll_epi32(mm256_cvtepu16_epi32(av), sh16)),
-        mm256_castsi256_ps(mm256_sll_epi32(mm256_cvtepu16_epi32(bv), sh16)), acc0)
+        mm256_castsi256_ps(mm256_sll_epi32(mm256_cvtepu16_epi32(bv), sh16)),
+        acc0,
+      )
       i += 8
     result = hsum256(mm256_add_ps(acc0, acc1))
-  while i < n:                                   # scalar tail (and the whole scalar build)
-    result += toFloat32(a[i]) * toFloat32(b[i]); inc i
+  while i < n: # scalar tail (and the whole scalar build)
+    result += toFloat32(a[i]) * toFloat32(b[i])
+    inc i
 
 proc dotF16*(a, b: openArray[F16]): float32 =
   ## Σ decode(aᵢ)·decode(bᵢ) over IEEE fp16, accumulated in fp32 — the hardware
@@ -89,8 +102,11 @@ proc dotF16*(a, b: openArray[F16]): float32 =
     while i + 8 <= n:
       let af = vreinterpretq_f16_u16(vld1q_u16(cast[ptr uint16](unsafeAddr a[i])))
       let bf = vreinterpretq_f16_u16(vld1q_u16(cast[ptr uint16](unsafeAddr b[i])))
-      acc0 = vfmaq_f32(acc0, vcvt_f32_f16(vget_low_f16(af)),  vcvt_f32_f16(vget_low_f16(bf)))
-      acc1 = vfmaq_f32(acc1, vcvt_f32_f16(vget_high_f16(af)), vcvt_f32_f16(vget_high_f16(bf)))
+      acc0 =
+        vfmaq_f32(acc0, vcvt_f32_f16(vget_low_f16(af)), vcvt_f32_f16(vget_low_f16(bf)))
+      acc1 = vfmaq_f32(
+        acc1, vcvt_f32_f16(vget_high_f16(af)), vcvt_f32_f16(vget_high_f16(bf))
+      )
       i += 8
     result = vaddvq_f32(vaddq_f32(acc0, acc1))
   elif lpUseAvx2:
@@ -111,6 +127,7 @@ proc dotF16*(a, b: openArray[F16]): float32 =
       i += 8
     result = hsum256(mm256_add_ps(acc0, acc1))
   while i < n:
-    result += toFloat32(a[i]) * toFloat32(b[i]); inc i
+    result += toFloat32(a[i]) * toFloat32(b[i])
+    inc i
 
 {.pop.}

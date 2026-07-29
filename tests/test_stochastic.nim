@@ -16,31 +16,34 @@ proc bracketCodes(x: float32): (uint16, uint16) =
   ## the two bf16 codes bracketing x: (lo = truncation, hi = lo or lo+1)
   let u = cast[uint32](x)
   let lo = uint16(u shr 16)
-  let hi = (if (u and 0xffff'u32) == 0'u32: lo else: uint16((u shr 16) + 1'u32))
+  let hi = (if (u and 0xffff'u32) == 0'u32: lo
+  else: uint16((u shr 16) + 1'u32))
   (lo, hi)
 
 suite "stochastic bf16 rounding":
-
   test "(a) result always lands on one of the two bracketing bf16 values":
-    var gen = 0xC0FFEE11'u32          # PRNG for inputs
-    var rng = 0x12345678'u32          # state under test
+    var gen = 0xC0FFEE11'u32 # PRNG for inputs
+    var rng = 0x12345678'u32 # state under test
     var checked = 0
     var mm = 0
     for _ in 0 ..< 60000:
       let bits = nextRand(gen)
       let x = cast[float32](bits)
-      if (bits and 0x7fff_ffff'u32) >= 0x7f80_0000'u32: continue   # skip NaN/Inf
+      if (bits and 0x7fff_ffff'u32) >= 0x7f80_0000'u32:
+        continue # skip NaN/Inf
       let (lo, hi) = bracketCodes(x)
       let r = toBF16Stochastic(x, rng)
       let code = r.bits
-      if code != lo and code != hi: inc mm
+      if code != lo and code != hi:
+        inc mm
       # the two bf16 values really do bracket x
       let loF = BF16(lo).toFloat32
       let hiF = BF16(hi).toFloat32
-      if not (x >= min(loF, hiF) and x <= max(loF, hiF)): inc mm
+      if not (x >= min(loF, hiF) and x <= max(loF, hiF)):
+        inc mm
       inc checked
     check mm == 0
-    check checked > 40000            # made sure the loop actually exercised the path
+    check checked > 40000 # made sure the loop actually exercised the path
 
   test "(a') representable values are returned exactly":
     var rng = 0xDEADBEEF'u32
@@ -61,7 +64,7 @@ suite "stochastic bf16 rounding":
       let relErr = abs(mean - x.float64) / abs(x.float64)
       worst = max(worst, relErr)
       echo "  x=", x, "  mean=", mean, "  relErr=", relErr
-      check relErr < 1e-3            # tight: theoretical SE over 200k draws is ~5e-6
+      check relErr < 1e-3 # tight: theoretical SE over 200k draws is ~5e-6
     echo "  worst relErr over all x = ", worst
 
   test "(c) NaN in -> NaN out; Inf stays Inf":
@@ -74,7 +77,7 @@ suite "stochastic bf16 rounding":
     var a = 0x01020304'u32
     let before = a
     discard toBF16Stochastic(1.3'f32, a)
-    check a != before                # state was updated in place
+    check a != before # state was updated in place
     # same seed -> same sequence (pure function of the threaded state)
     var s1 = 0x55555555'u32
     var s2 = 0x55555555'u32

@@ -33,24 +33,32 @@ type
 
   BenchGroup* = object
     title, unit, workLabel: string
-    work: float     ## elements or flops per run — the throughput numerator
-    scale: float    ## 1e6 for Melem/s, 1e9 for GFLOP/s
-    tol: float      ## allowed relative checksum drift between paths
+    work: float ## elements or flops per run — the throughput numerator
+    scale: float ## 1e6 for Melem/s, 1e9 for GFLOP/s
+    tol: float ## allowed relative checksum drift between paths
     rows: seq[BenchRow]
 
-func withSep(n: int): string = ($n).insertSep(',')
+func withSep(n: int): string =
+  ($n).insertSep(',')
 
-func elemGroup*(title: string; n: int; tol = 0.0): BenchGroup =
+func elemGroup*(title: string, n: int, tol = 0.0): BenchGroup =
   ## Throughput in elements/s. `tol = 0` demands bit-identical checksums.
-  BenchGroup(title: title, unit: "Melem/s", workLabel: "N = " & withSep(n),
-             work: n.float, scale: 1e6, tol: tol)
+  BenchGroup(
+    title: title,
+    unit: "Melem/s",
+    workLabel: "N = " & withSep(n),
+    work: n.float,
+    scale: 1e6,
+    tol: tol,
+  )
 
-func flopGroup*(title, shape: string; flops: float; tol = 1e-3): BenchGroup =
+func flopGroup*(title, shape: string, flops: float, tol = 1e-3): BenchGroup =
   ## Throughput in GFLOP/s, for the GEMV/dot reductions. Tolerance, not exactness.
-  BenchGroup(title: title, unit: "GFLOP/s", workLabel: shape,
-             work: flops, scale: 1e9, tol: tol)
+  BenchGroup(
+    title: title, unit: "GFLOP/s", workLabel: shape, work: flops, scale: 1e9, tol: tol
+  )
 
-template measure*(g: var BenchGroup; name: string; checksum, body: untyped) =
+template measure*(g: var BenchGroup, name: string, checksum, body: untyped) =
   ## Time `body` (warm-up + `benchReps` runs, best kept) and record `checksum` —
   ## an expression reading the result, evaluated after the last run. It both keeps
   ## the optimizer from deleting the work and proves the paths agree.
@@ -61,14 +69,15 @@ template measure*(g: var BenchGroup; name: string; checksum, body: untyped) =
       let t0 = getMonoTime()
       body
       let s = float((getMonoTime() - t0).inNanoseconds) / 1e9
-      if s < best: best = s
+      if s < best:
+        best = s
     g.rows.add BenchRow(label: name, sec: best, chk: float(checksum))
 
-template scalarRow*(g: var BenchGroup; checksum, body: untyped) =
+template scalarRow*(g: var BenchGroup, checksum, body: untyped) =
   ## The reference path — always first, so it is the speedup baseline.
   measure(g, "scalar ref", checksum, body)
 
-template kernelRow*(g: var BenchGroup; checksum, body: untyped) =
+template kernelRow*(g: var BenchGroup, checksum, body: untyped) =
   ## The library kernel, labelled by the ISA it was actually compiled for.
   measure(g, simdBackend & " kernel", checksum, body)
 
@@ -77,13 +86,12 @@ proc report*(g: BenchGroup) =
   ## checksum verdict. Speedups are relative to the first row.
   echo ""
   echo &"── {g.title}  ·  {g.workLabel}  ·  best of {benchReps}"
-  echo "   " & alignLeft("path", 16) & align("ms", 10) &
-       align(g.unit, 12) & align("speedup", 10)
+  echo "   " & alignLeft("path", 16) & align("ms", 10) & align(g.unit, 12) &
+    align("speedup", 10)
   let base = g.rows[0].sec
   for r in g.rows:
     echo "   " & alignLeft(r.label, 16) & align(&"{r.sec * 1e3:.2f}", 10) &
-         align(&"{g.work / r.sec / g.scale:.1f}", 12) &
-         align(&"{base / r.sec:.2f}x", 10)
+      align(&"{g.work / r.sec / g.scale:.1f}", 12) & align(&"{base / r.sec:.2f}x", 10)
 
   let want = g.rows[0].chk
   var bad: seq[string]
@@ -92,7 +100,11 @@ proc report*(g: BenchGroup) =
     if r.chk != want and (g.tol <= 0.0 or drift > g.tol or isNaN(drift)):
       bad.add &"{r.label} = {r.chk:.9g}"
   if bad.len == 0:
-    let how = if g.tol <= 0.0: "bit-identical" else: &"within {g.tol:.0e}"
+    let how =
+      if g.tol <= 0.0:
+        "bit-identical"
+      else:
+        &"within {g.tol:.0e}"
     echo &"   checksum {want:.9g} — all paths agree ({how})"
   else:
     echo &"   CHECKSUM MISMATCH: baseline {want:.9g} vs " & bad.join(", ")
@@ -109,8 +121,11 @@ proc warmCore() =
   var acc = 1.000001'f32
   let t0 = getMonoTime()
   while (getMonoTime() - t0).inMilliseconds < 50:
-    for _ in 1 .. 100_000: acc *= 1.0000001'f32
-  if acc == 0.0'f32: echo ""       # keep the loop from being optimized away
+    for _ in 1 .. 100_000:
+      acc *= 1.0000001'f32
+  if acc == 0.0'f32:
+    echo ""
+    # keep the loop from being optimized away
 
 proc header*(what: string) =
   warmCore()

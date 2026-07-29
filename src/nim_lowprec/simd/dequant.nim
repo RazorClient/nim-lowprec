@@ -34,8 +34,10 @@ import ./target
 # therefore explicit: where an FMA is wanted the code says vfmaq_f32/_mm256_fmadd,
 # and the C compiler is not allowed to invent others.
 {.localPassc: "-ffp-contract=off".}
-when lpUseNeon: import ./neon
-when lpUseAvx2: import ./x86
+when lpUseNeon:
+  import ./neon
+when lpUseAvx2:
+  import ./x86
 
 # 2× the MXFP4 (e2m1) value for each 4-bit code — all integers, so fp4 decode is
 # a byte-LUT straight into the int8 widen+FMA path; the ×2 is undone by halving
@@ -53,7 +55,7 @@ when lpUseAvx2: import ./x86
 {.push boundChecks: off, overflowChecks: off.}
 
 const mxfp4Lut2x: array[16, int8] =
-  [int8 0, 1, 2, 3, 4, 6, 8, 12,   0, -1, -2, -3, -4, -6, -8, -12]
+  [int8 0, 1, 2, 3, 4, 6, 8, 12, 0, -1, -2, -3, -4, -6, -8, -12]
 
 when lpUseNeon:
   # widen one int8x16 (16 weights for columns `col..col+15`) and FMA into FOUR
@@ -69,10 +71,20 @@ when lpUseNeon:
   template fmaBlock(a0, a1, a2, a3, w, x, col: untyped) =
     let l16 = vmovl_s8(vget_low_s8(w))
     let h16 = vmovl_s8(vget_high_s8(w))
-    a0 = vfmaq_f32(a0, vcvtq_f32_s32(vmovl_s16(vget_low_s16(l16))),  vld1q_f32(unsafeAddr x[col]))
-    a1 = vfmaq_f32(a1, vcvtq_f32_s32(vmovl_s16(vget_high_s16(l16))), vld1q_f32(unsafeAddr x[col + 4]))
-    a2 = vfmaq_f32(a2, vcvtq_f32_s32(vmovl_s16(vget_low_s16(h16))),  vld1q_f32(unsafeAddr x[col + 8]))
-    a3 = vfmaq_f32(a3, vcvtq_f32_s32(vmovl_s16(vget_high_s16(h16))), vld1q_f32(unsafeAddr x[col + 12]))
+    a0 = vfmaq_f32(
+      a0, vcvtq_f32_s32(vmovl_s16(vget_low_s16(l16))), vld1q_f32(unsafeAddr x[col])
+    )
+    a1 = vfmaq_f32(
+      a1, vcvtq_f32_s32(vmovl_s16(vget_high_s16(l16))), vld1q_f32(unsafeAddr x[col + 4])
+    )
+    a2 = vfmaq_f32(
+      a2, vcvtq_f32_s32(vmovl_s16(vget_low_s16(h16))), vld1q_f32(unsafeAddr x[col + 8])
+    )
+    a3 = vfmaq_f32(
+      a3,
+      vcvtq_f32_s32(vmovl_s16(vget_high_s16(h16))),
+      vld1q_f32(unsafeAddr x[col + 12]),
+    )
 
   # Fold the four accumulators down to one fp32: two lanewise adds, then one
   # horizontal sum (cheaper than four vaddvq_f32).
@@ -95,10 +107,16 @@ when lpUseNeon:
   template widenMulStore(v, dst, di, s: untyped) =
     let loH = vmovl_s8(vget_low_s8(v))
     let hiH = vmovl_s8(vget_high_s8(v))
-    vst1q_f32(addr dst[di],      vmulq_n_f32(vcvtq_f32_s32(vmovl_s16(vget_low_s16(loH))),  s))
-    vst1q_f32(addr dst[di + 4],  vmulq_n_f32(vcvtq_f32_s32(vmovl_s16(vget_high_s16(loH))), s))
-    vst1q_f32(addr dst[di + 8],  vmulq_n_f32(vcvtq_f32_s32(vmovl_s16(vget_low_s16(hiH))),  s))
-    vst1q_f32(addr dst[di + 12], vmulq_n_f32(vcvtq_f32_s32(vmovl_s16(vget_high_s16(hiH))), s))
+    vst1q_f32(addr dst[di], vmulq_n_f32(vcvtq_f32_s32(vmovl_s16(vget_low_s16(loH))), s))
+    vst1q_f32(
+      addr dst[di + 4], vmulq_n_f32(vcvtq_f32_s32(vmovl_s16(vget_high_s16(loH))), s)
+    )
+    vst1q_f32(
+      addr dst[di + 8], vmulq_n_f32(vcvtq_f32_s32(vmovl_s16(vget_low_s16(hiH))), s)
+    )
+    vst1q_f32(
+      addr dst[di + 12], vmulq_n_f32(vcvtq_f32_s32(vmovl_s16(vget_high_s16(hiH))), s)
+    )
 
   # widen 16 int8 (base i) -> 4×float32x4, multiply by scalar s, store to dst.
   template blockS8(q, dst, i, s: untyped) =
@@ -110,16 +128,25 @@ when lpUseAvx2:
   # TWO INDEPENDENT accumulators — same dependency-chain reasoning as the NEON
   # `fmaBlock` above (vfmadd has ~4-cycle latency, several issue per cycle).
   template fmaBlockX86(a0, a1, v, x, col: untyped) =
-    a0 = mm256_fmadd_ps(mm256_cvtepi32_ps(mm256_cvtepi8_epi32(v)),
-                        mm256_loadu_ps(unsafeAddr x[col]), a0)
-    a1 = mm256_fmadd_ps(mm256_cvtepi32_ps(mm256_cvtepi8_epi32(mm_unpackhi_epi64(v, v))),
-                        mm256_loadu_ps(unsafeAddr x[col + 8]), a1)
+    a0 = mm256_fmadd_ps(
+      mm256_cvtepi32_ps(mm256_cvtepi8_epi32(v)), mm256_loadu_ps(unsafeAddr x[col]), a0
+    )
+    a1 = mm256_fmadd_ps(
+      mm256_cvtepi32_ps(mm256_cvtepi8_epi32(mm_unpackhi_epi64(v, v))),
+      mm256_loadu_ps(unsafeAddr x[col + 8]),
+      a1,
+    )
 
   # widen one m128i of 16 int8 -> 2×(8×f32), multiply by the dup'd scale sv,
   # store 16 floats at dst[di..di+15].
   template widenMulStoreX86(v, dst, di, sv: untyped) =
-    mm256_storeu_ps(addr dst[di],     mm256_mul_ps(mm256_cvtepi32_ps(mm256_cvtepi8_epi32(v)), sv))
-    mm256_storeu_ps(addr dst[di + 8], mm256_mul_ps(mm256_cvtepi32_ps(mm256_cvtepi8_epi32(mm_unpackhi_epi64(v, v))), sv))
+    mm256_storeu_ps(
+      addr dst[di], mm256_mul_ps(mm256_cvtepi32_ps(mm256_cvtepi8_epi32(v)), sv)
+    )
+    mm256_storeu_ps(
+      addr dst[di + 8],
+      mm256_mul_ps(mm256_cvtepi32_ps(mm256_cvtepi8_epi32(mm_unpackhi_epi64(v, v))), sv),
+    )
 
   # widen 16 int8 (base i) -> 2×(8×f32), multiply by scalar s, store to dst.
   template blockS8X86(q, dst, i, s: untyped) =
@@ -130,7 +157,7 @@ when lpUseAvx2:
 # ---------------- dequantizeBatch (elementwise, bit-exact vs scalar) ----------------
 
 template defDequantBatch(T: untyped) =
-  proc dequantizeBatch*(q: openArray[T]; p: QParams; dst: var openArray[float32]) =
+  proc dequantizeBatch*(q: openArray[T], p: QParams, dst: var openArray[float32]) =
     assert q.len == dst.len
     # The SIMD fast path handles the symmetric case only (no zero-point); its
     # group loop walks the per-group scales in order. Asymmetric quant and
@@ -149,7 +176,8 @@ template defDequantBatch(T: untyped) =
             blockS8(q, dst, i, s)
             i += 16
           while i < hi:
-            dst[i] = float32(int8(q[i])) * s; inc i
+            dst[i] = float32(int8(q[i])) * s
+            inc i
           base = hi
           inc g
         return
@@ -167,26 +195,32 @@ template defDequantBatch(T: untyped) =
             blockS8X86(q, dst, i, s)
             i += 16
           while i < hi:
-            dst[i] = float32(int8(q[i])) * s; inc i
+            dst[i] = float32(int8(q[i])) * s
+            inc i
           base = hi
           inc g
         return
-    dequantize(q, p, dst)   # asymmetric / non-SIMD build: bit-exact scalar path
+    dequantize(q, p, dst) # asymmetric / non-SIMD build: bit-exact scalar path
 
 defDequantBatch(I8)
 defDequantBatch(I4)
 
 # ---------------- fused dequant-GEMV (reduction, tolerance-tested) ----------------
 
-proc dequantGemv*(wq: openArray[I8]; scales: openArray[float32]; groupSize: int;
-                  x: openArray[float32]; y: var openArray[float32]) =
+proc dequantGemv*(
+    wq: openArray[I8],
+    scales: openArray[float32],
+    groupSize: int,
+    x: openArray[float32],
+    y: var openArray[float32],
+) =
   ## y[m] = Σ_k (int8(W[m,k]) * scale[m, k div groupSize]) * x[k].
   ## W is M×K row-major (`wq`), `scales` is M×(K div groupSize) row-major,
   ## x is length K, y is length M. Weights are dequantised IN-REGISTER — never
   ## written out as an fp32 matrix (that's the whole point of fused GEMV).
   let m = y.len
   let k = x.len
-  let gpr = k div groupSize                         # groups per row
+  let gpr = k div groupSize # groups per row
   assert wq.len == m * k
   assert scales.len == m * gpr
   assert k mod groupSize == 0
@@ -204,7 +238,8 @@ proc dequantGemv*(wq: openArray[I8]; scales: openArray[float32]; groupSize: int;
         acc4(a0, a1, a2, a3)
         while kk + 16 <= gend:
           let wv = vld1q_s8(cast[ptr int8](unsafeAddr wq[wbase + kk]))
-          fmaBlock(a0, a1, a2, a3, wv, x, kk)   # widen 16 int8 + 4× FMA (shared with the I4 GEMV)
+          fmaBlock(a0, a1, a2, a3, wv, x, kk)
+            # widen 16 int8 + 4× FMA (shared with the I4 GEMV)
           kk += 16
         partial = foldAcc(a0, a1, a2, a3)
       elif lpUseAvx2:
@@ -215,14 +250,19 @@ proc dequantGemv*(wq: openArray[I8]; scales: openArray[float32]; groupSize: int;
           fmaBlockX86(b0, b1, v, x, kk)
           kk += 16
         partial = hsum256(mm256_add_ps(b0, b1))
-      while kk < gend:                              # scalar tail within group
+      while kk < gend: # scalar tail within group
         partial += float32(int8(wq[wbase + kk])) * x[kk]
         inc kk
       total += partial * s
     y[row] = total
 
-proc dequantGemvI4*(wpacked: openArray[byte]; scales: openArray[float32]; groupSize: int;
-                    x: openArray[float32]; y: var openArray[float32]) =
+proc dequantGemvI4*(
+    wpacked: openArray[byte],
+    scales: openArray[float32],
+    groupSize: int,
+    x: openArray[float32],
+    y: var openArray[float32],
+) =
   ## Fused GEMV with PACKED int4 weights (2 per byte, ggml low-nibble-first).
   ## W is M×K; `wpacked` is M×(K div 2) bytes row-major; `scales` is
   ## M×(K div groupSize); x is length K, y is length M. Nibbles are unpacked +
@@ -241,8 +281,8 @@ proc dequantGemvI4*(wpacked: openArray[byte]; scales: openArray[float32]; groupS
     let sh4neg = vdupq_n_s8(-4'i8)
   when lpUseAvx2:
     let mask0f = mm_set1_epi8(0x0f)
-    let eight  = mm_set1_epi8(8)
-    let cnt4   = mm_cvtsi32_si128(4.cint)
+    let eight = mm_set1_epi8(8)
+    let cnt4 = mm_cvtsi32_si128(4.cint)
   for row in 0 ..< m:
     let wbase = row * rowBytes
     let sbase = row * gpr
@@ -255,14 +295,15 @@ proc dequantGemvI4*(wpacked: openArray[byte]; scales: openArray[float32]; groupS
       var kk = gstart
       when lpUseNeon:
         acc4(a0, a1, a2, a3)
-        while kk + 32 <= gend:                     # 16 bytes = 32 int4 columns
-          let pv  = vld1q_u8(cast[ptr uint8](unsafeAddr wpacked[wbase + (kk shr 1)]))
-          let loN = vandq_u8(pv, m0f)              # low nibbles  (even columns)
-          let hiN = vshlq_u8(pv, sh4neg)           # high nibbles (odd columns), >>4
-          let loS = vshlq_s8(vshlq_s8(vreinterpretq_s8_u8(loN), sh4pos), sh4neg)  # sign-extend 4-bit
+        while kk + 32 <= gend: # 16 bytes = 32 int4 columns
+          let pv = vld1q_u8(cast[ptr uint8](unsafeAddr wpacked[wbase + (kk shr 1)]))
+          let loN = vandq_u8(pv, m0f) # low nibbles  (even columns)
+          let hiN = vshlq_u8(pv, sh4neg) # high nibbles (odd columns), >>4
+          let loS = vshlq_s8(vshlq_s8(vreinterpretq_s8_u8(loN), sh4pos), sh4neg)
+            # sign-extend 4-bit
           let hiS = vshlq_s8(vshlq_s8(vreinterpretq_s8_u8(hiN), sh4pos), sh4neg)
-          let wA = vzip1q_s8(loS, hiS)             # columns kk .. kk+15, in order
-          let wB = vzip2q_s8(loS, hiS)             # columns kk+16 .. kk+31
+          let wA = vzip1q_s8(loS, hiS) # columns kk .. kk+15, in order
+          let wB = vzip2q_s8(loS, hiS) # columns kk+16 .. kk+31
           fmaBlock(a0, a1, a2, a3, wA, x, kk)
           fmaBlock(a0, a1, a2, a3, wB, x, kk + 16)
           kk += 32
@@ -270,29 +311,40 @@ proc dequantGemvI4*(wpacked: openArray[byte]; scales: openArray[float32]; groupS
       elif lpUseAvx2:
         var b0 = mm256_setzero_ps()
         var b1 = mm256_setzero_ps()
-        while kk + 32 <= gend:                     # 16 bytes = 32 int4 columns
-          let pv  = mm_loadu_si128(cast[ptr m128i](unsafeAddr wpacked[wbase + (kk shr 1)]))
-          let loN = mm_and_si128(pv, mask0f)                     # low nibbles  (even columns)
-          let hiN = mm_and_si128(mm_srl_epi16(pv, cnt4), mask0f) # high nibbles (odd columns), >>4
+        while kk + 32 <= gend: # 16 bytes = 32 int4 columns
+          let pv =
+            mm_loadu_si128(cast[ptr m128i](unsafeAddr wpacked[wbase + (kk shr 1)]))
+          let loN = mm_and_si128(pv, mask0f) # low nibbles  (even columns)
+          let hiN = mm_and_si128(mm_srl_epi16(pv, cnt4), mask0f)
+            # high nibbles (odd columns), >>4
           # sign-extend a 4-bit value: (n xor 8) - 8  (per byte, shift-free)
           let loS = mm_sub_epi8(mm_xor_si128(loN, eight), eight)
           let hiS = mm_sub_epi8(mm_xor_si128(hiN, eight), eight)
-          let wA = mm_unpacklo_epi8(loS, hiS)      # columns kk .. kk+15, in order
-          let wB = mm_unpackhi_epi8(loS, hiS)      # columns kk+16 .. kk+31
+          let wA = mm_unpacklo_epi8(loS, hiS) # columns kk .. kk+15, in order
+          let wB = mm_unpackhi_epi8(loS, hiS) # columns kk+16 .. kk+31
           fmaBlockX86(b0, b1, wA, x, kk)
           fmaBlockX86(b0, b1, wB, x, kk + 16)
           kk += 32
         partial = hsum256(mm256_add_ps(b0, b1))
-      while kk < gend:                             # scalar tail
+      while kk < gend: # scalar tail
         let b = wpacked[wbase + (kk shr 1)]
-        let nib = if (kk and 1) == 0: b and 0x0f'u8 else: b shr 4
+        let nib =
+          if (kk and 1) == 0:
+            b and 0x0f'u8
+          else:
+            b shr 4
         partial += fromNibble(nib).toFloat32 * x[kk]
         inc kk
       total += partial * s
     y[row] = total
 
-proc dequantGemvF4*(wpacked: openArray[byte]; scales: openArray[float32]; groupSize: int;
-                    x: openArray[float32]; y: var openArray[float32]) =
+proc dequantGemvF4*(
+    wpacked: openArray[byte],
+    scales: openArray[float32],
+    groupSize: int,
+    x: openArray[float32],
+    y: var openArray[float32],
+) =
   ## Fused GEMV with PACKED MXFP4 weights (2 per byte, ggml low-nibble-first) and
   ## per-block E8M0 scales (from `calibrateMX`). W is M×K; `wpacked` is M×(K div 2)
   ## bytes; `scales` is M×(K div groupSize) — the power-of-two block scales; x is
@@ -320,21 +372,21 @@ proc dequantGemvF4*(wpacked: openArray[byte]; scales: openArray[float32]; groupS
     let sbase = row * gpr
     var total = 0.0'f32
     for g in 0 ..< gpr:
-      let s = scales[sbase + g] * 0.5'f32          # halve to undo the LUT's ×2
+      let s = scales[sbase + g] * 0.5'f32 # halve to undo the LUT's ×2
       let gstart = g * groupSize
       let gend = gstart + groupSize
       var partial = 0.0'f32
       var kk = gstart
       when lpUseNeon:
         acc4(a0, a1, a2, a3)
-        while kk + 32 <= gend:                     # 16 bytes = 32 fp4 columns
-          let pv  = vld1q_u8(cast[ptr uint8](unsafeAddr wpacked[wbase + (kk shr 1)]))
-          let loN = vandq_u8(pv, m0f)              # low nibbles  (even columns)
-          let hiN = vshlq_u8(pv, sh4neg)           # high nibbles (odd columns), >>4
-          let loV = vqtbl1q_s8(lut, loN)           # 2×value (even columns)
-          let hiV = vqtbl1q_s8(lut, hiN)           # 2×value (odd columns)
-          let wA = vzip1q_s8(loV, hiV)             # columns kk .. kk+15, in order
-          let wB = vzip2q_s8(loV, hiV)             # columns kk+16 .. kk+31
+        while kk + 32 <= gend: # 16 bytes = 32 fp4 columns
+          let pv = vld1q_u8(cast[ptr uint8](unsafeAddr wpacked[wbase + (kk shr 1)]))
+          let loN = vandq_u8(pv, m0f) # low nibbles  (even columns)
+          let hiN = vshlq_u8(pv, sh4neg) # high nibbles (odd columns), >>4
+          let loV = vqtbl1q_s8(lut, loN) # 2×value (even columns)
+          let hiV = vqtbl1q_s8(lut, hiN) # 2×value (odd columns)
+          let wA = vzip1q_s8(loV, hiV) # columns kk .. kk+15, in order
+          let wB = vzip2q_s8(loV, hiV) # columns kk+16 .. kk+31
           fmaBlock(a0, a1, a2, a3, wA, x, kk)
           fmaBlock(a0, a1, a2, a3, wB, x, kk + 16)
           kk += 32
@@ -343,20 +395,25 @@ proc dequantGemvF4*(wpacked: openArray[byte]; scales: openArray[float32]; groupS
         var b0 = mm256_setzero_ps()
         var b1 = mm256_setzero_ps()
         while kk + 32 <= gend:
-          let pv  = mm_loadu_si128(cast[ptr m128i](unsafeAddr wpacked[wbase + (kk shr 1)]))
+          let pv =
+            mm_loadu_si128(cast[ptr m128i](unsafeAddr wpacked[wbase + (kk shr 1)]))
           let loN = mm_and_si128(pv, mask0f)
           let hiN = mm_and_si128(mm_srl_epi16(pv, cnt4), mask0f)
-          let loV = mm_shuffle_epi8(lut, loN)      # 2×value (even columns)
-          let hiV = mm_shuffle_epi8(lut, hiN)      # 2×value (odd columns)
-          let wA = mm_unpacklo_epi8(loV, hiV)      # columns kk .. kk+15
-          let wB = mm_unpackhi_epi8(loV, hiV)      # columns kk+16 .. kk+31
+          let loV = mm_shuffle_epi8(lut, loN) # 2×value (even columns)
+          let hiV = mm_shuffle_epi8(lut, hiN) # 2×value (odd columns)
+          let wA = mm_unpacklo_epi8(loV, hiV) # columns kk .. kk+15
+          let wB = mm_unpackhi_epi8(loV, hiV) # columns kk+16 .. kk+31
           fmaBlockX86(b0, b1, wA, x, kk)
           fmaBlockX86(b0, b1, wB, x, kk + 16)
           kk += 32
         partial = hsum256(mm256_add_ps(b0, b1))
-      while kk < gend:                             # scalar tail
+      while kk < gend: # scalar tail
         let b = wpacked[wbase + (kk shr 1)]
-        let nib = if (kk and 1) == 0: b and 0x0f'u8 else: b shr 4
+        let nib =
+          if (kk and 1) == 0:
+            b and 0x0f'u8
+          else:
+            b shr 4
         partial += float32(mxfp4Lut2x[int(nib)]) * x[kk]
         inc kk
       total += partial * s
@@ -386,7 +443,7 @@ when lpUseNeon:
     dbuf[3] = bits(blocks[i + 3].d)
     vst1q_f32(addr dsf[0], vcvt_f32_f16(vreinterpret_f16_u16(vld1_u16(addr dbuf[0]))))
 
-proc dequantizeQ8_0Batch*(blocks: openArray[BlockQ8_0]; dst: var openArray[float32]) =
+proc dequantizeQ8_0Batch*(blocks: openArray[BlockQ8_0], dst: var openArray[float32]) =
   ## value[i] = d·q[i]. `dst.len` must be `blocks.len * QK`. Bit-exact.
   assert dst.len == blocks.len * QK
   when lpUseNeon:
@@ -396,25 +453,38 @@ proc dequantizeQ8_0Batch*(blocks: openArray[BlockQ8_0]; dst: var openArray[float
       decodeD4(blocks, bi, dsf)
       for j in 0 ..< 4:
         let o = (bi + j) * QK
-        widenMulStore(vld1q_s8(cast[ptr int8](unsafeAddr blocks[bi + j].qs[0])),  dst, o,      dsf[j])
-        widenMulStore(vld1q_s8(cast[ptr int8](unsafeAddr blocks[bi + j].qs[16])), dst, o + 16, dsf[j])
+        widenMulStore(
+          vld1q_s8(cast[ptr int8](unsafeAddr blocks[bi + j].qs[0])), dst, o, dsf[j]
+        )
+        widenMulStore(
+          vld1q_s8(cast[ptr int8](unsafeAddr blocks[bi + j].qs[16])),
+          dst,
+          o + 16,
+          dsf[j],
+        )
       bi += 4
     while bi < blocks.len:
       let d = blocks[bi].d.toFloat32
       let o = bi * QK
-      widenMulStore(vld1q_s8(cast[ptr int8](unsafeAddr blocks[bi].qs[0])),  dst, o,      d)
-      widenMulStore(vld1q_s8(cast[ptr int8](unsafeAddr blocks[bi].qs[16])), dst, o + 16, d)
+      widenMulStore(vld1q_s8(cast[ptr int8](unsafeAddr blocks[bi].qs[0])), dst, o, d)
+      widenMulStore(
+        vld1q_s8(cast[ptr int8](unsafeAddr blocks[bi].qs[16])), dst, o + 16, d
+      )
       inc bi
   elif lpUseAvx2:
     for bi in 0 ..< blocks.len:
       let sv = mm256_set1_ps(blocks[bi].d.toFloat32)
       let o = bi * QK
-      widenMulStoreX86(mm_loadu_si128(cast[ptr m128i](unsafeAddr blocks[bi].qs[0])),  dst, o,      sv)
-      widenMulStoreX86(mm_loadu_si128(cast[ptr m128i](unsafeAddr blocks[bi].qs[16])), dst, o + 16, sv)
+      widenMulStoreX86(
+        mm_loadu_si128(cast[ptr m128i](unsafeAddr blocks[bi].qs[0])), dst, o, sv
+      )
+      widenMulStoreX86(
+        mm_loadu_si128(cast[ptr m128i](unsafeAddr blocks[bi].qs[16])), dst, o + 16, sv
+      )
   else:
     dequantizeQ8_0(blocks, dst)
 
-proc dequantizeQ4_0Batch*(blocks: openArray[BlockQ4_0]; dst: var openArray[float32]) =
+proc dequantizeQ4_0Batch*(blocks: openArray[BlockQ4_0], dst: var openArray[float32]) =
   ## value[i] = d·(nibble[i] − 8), ggml lane order (low nibbles → lanes 0..15,
   ## high → 16..31). `dst.len` must be `blocks.len * QK`. Bit-exact.
   assert dst.len == blocks.len * QK
@@ -427,36 +497,42 @@ proc dequantizeQ4_0Batch*(blocks: openArray[BlockQ4_0]; dst: var openArray[float
       let pv = vld1q_u8(cast[ptr uint8](unsafeAddr blocks[bi].qs[0]))
       let loV = vsubq_s8(vreinterpretq_s8_u8(vandq_u8(pv, m0f)), eight)
       let hiV = vsubq_s8(vreinterpretq_s8_u8(vshlq_u8(pv, sh4neg)), eight)
-      widenMulStore(loV, dst, o,      d)
+      widenMulStore(loV, dst, o, d)
       widenMulStore(hiV, dst, o + 16, d)
+
     var dsf {.noinit.}: array[4, float32]
     var bi = 0
     while bi + 4 <= blocks.len:
       decodeD4(blocks, bi, dsf)
-      for j in 0 ..< 4: oneQ4(bi + j, dsf[j])
+      for j in 0 ..< 4:
+        oneQ4(bi + j, dsf[j])
       bi += 4
     while bi < blocks.len:
       oneQ4(bi, blocks[bi].d.toFloat32)
       inc bi
   elif lpUseAvx2:
     let mask0f = mm_set1_epi8(0x0f)
-    let eight  = mm_set1_epi8(8)
-    let cnt4   = mm_cvtsi32_si128(4.cint)
+    let eight = mm_set1_epi8(8)
+    let cnt4 = mm_cvtsi32_si128(4.cint)
     for bi in 0 ..< blocks.len:
       let sv = mm256_set1_ps(blocks[bi].d.toFloat32)
       let o = bi * QK
       let pv = mm_loadu_si128(cast[ptr m128i](unsafeAddr blocks[bi].qs[0]))
       let loV = mm_sub_epi8(mm_and_si128(pv, mask0f), eight)
       let hiV = mm_sub_epi8(mm_and_si128(mm_srl_epi16(pv, cnt4), mask0f), eight)
-      widenMulStoreX86(loV, dst, o,      sv)
+      widenMulStoreX86(loV, dst, o, sv)
       widenMulStoreX86(hiV, dst, o + 16, sv)
   else:
     dequantizeQ4_0(blocks, dst)
 
 # ---------------- fused GEMV over ggml block formats (Q8_0, Q4_0) ----------------
 
-proc dequantGemvQ8_0*(w: openArray[BlockQ8_0]; blocksPerRow: int;
-                      x: openArray[float32]; y: var openArray[float32]) =
+proc dequantGemvQ8_0*(
+    w: openArray[BlockQ8_0],
+    blocksPerRow: int,
+    x: openArray[float32],
+    y: var openArray[float32],
+) =
   ## y[m] = Σ_blocks d_block · Σ_i (q[i]·x[i]) over ggml Q8_0 weights. `w` is
   ## M×blocksPerRow blocks (row-major); x is length blocksPerRow·QK; y is M.
   ## Reuses the int8 widen+FMA path; the fp16 block scale is applied per block.
@@ -486,12 +562,17 @@ proc dequantGemvQ8_0*(w: openArray[BlockQ8_0]; blocksPerRow: int;
         fmaBlockX86(b0, b1, v1, x, base + 16)
         partial = hsum256(mm256_add_ps(b0, b1))
       else:
-        for i in 0 ..< QK: partial += float32(blk.qs[i]) * x[base + i]
+        for i in 0 ..< QK:
+          partial += float32(blk.qs[i]) * x[base + i]
       total += partial * blk.d.toFloat32
     y[row] = total
 
-proc dequantGemvQ4_0*(w: openArray[BlockQ4_0]; blocksPerRow: int;
-                      x: openArray[float32]; y: var openArray[float32]) =
+proc dequantGemvQ4_0*(
+    w: openArray[BlockQ4_0],
+    blocksPerRow: int,
+    x: openArray[float32],
+    y: var openArray[float32],
+) =
   ## Same over ggml Q4_0 weights: value = d·(nibble−8). Low nibbles are the first
   ## 16 lanes of a block, high nibbles the last 16 (ggml order — grouped, not
   ## interleaved). `w` is M×blocksPerRow blocks; x is blocksPerRow·QK; y is M.
@@ -515,16 +596,18 @@ proc dequantGemvQ4_0*(w: openArray[BlockQ4_0]; blocksPerRow: int;
       var partial = 0.0'f32
       when lpUseNeon:
         acc4(a0, a1, a2, a3)
-        let pv  = vld1q_u8(cast[ptr uint8](unsafeAddr blk.qs[0]))
-        let loV = vsubq_s8(vreinterpretq_s8_u8(vandq_u8(pv, m0f)), eight)     # low nibbles − 8
-        let hiV = vsubq_s8(vreinterpretq_s8_u8(vshlq_u8(pv, sh4neg)), eight)  # high nibbles − 8
-        fmaBlock(a0, a1, a2, a3, loV, x, base)          # lanes 0..15
-        fmaBlock(a0, a1, a2, a3, hiV, x, base + 16)     # lanes 16..31
+        let pv = vld1q_u8(cast[ptr uint8](unsafeAddr blk.qs[0]))
+        let loV = vsubq_s8(vreinterpretq_s8_u8(vandq_u8(pv, m0f)), eight)
+          # low nibbles − 8
+        let hiV = vsubq_s8(vreinterpretq_s8_u8(vshlq_u8(pv, sh4neg)), eight)
+          # high nibbles − 8
+        fmaBlock(a0, a1, a2, a3, loV, x, base) # lanes 0..15
+        fmaBlock(a0, a1, a2, a3, hiV, x, base + 16) # lanes 16..31
         partial = foldAcc(a0, a1, a2, a3)
       elif lpUseAvx2:
         var b0 = mm256_setzero_ps()
         var b1 = mm256_setzero_ps()
-        let pv  = mm_loadu_si128(cast[ptr m128i](unsafeAddr blk.qs[0]))
+        let pv = mm_loadu_si128(cast[ptr m128i](unsafeAddr blk.qs[0]))
         let loV = mm_sub_epi8(mm_and_si128(pv, mask0f), eight)
         let hiV = mm_sub_epi8(mm_and_si128(mm_srl_epi16(pv, cnt4), mask0f), eight)
         fmaBlockX86(b0, b1, loV, x, base)
@@ -568,7 +651,7 @@ proc dequantGemvQ4_0*(w: openArray[BlockQ4_0]; blocksPerRow: int;
 # would need `pmaddubsw`+`madd` or AVX512-VNNI — prefer `dequantGemv`. Check
 # `lpUseDotProd` if you want to choose at compile time.
 
-template applyScales(isum: int32; ws, xs: float32): float32 =
+template applyScales(isum: int32, ws, xs: float32): float32 =
   ## The one fp expression every path must share, in the same order, or the SDOT,
   ## vector-finalize and fallback results would not be bit-identical.
   float32(isum) * ws * xs
@@ -607,9 +690,14 @@ template applyScales(isum: int32; ws, xs: float32): float32 =
 const lpStreamBytes {.intdefine.}: int = 12_582_912
 
 when lpUseDotProd:
-  proc gemvQ8Stream(wq: openArray[I8]; wScales: openArray[float32]; groupSize: int;
-                    xq: openArray[I8]; xScales: openArray[float32];
-                    y: var openArray[float32]) =
+  proc gemvQ8Stream(
+      wq: openArray[I8],
+      wScales: openArray[float32],
+      groupSize: int,
+      xq: openArray[I8],
+      xScales: openArray[float32],
+      y: var openArray[float32],
+  ) =
     ## Row-at-a-time int8×int8: one sequential weight stream, 4 SDOT chains over
     ## 64 columns per iteration, walking raw addresses.
     ##
@@ -635,24 +723,41 @@ when lpUseDotProd:
         var a3 = vdupq_n_s32(0'i32)
         var left = groupSize
         while left >= 64:
-          a0 = vdotq_s32(a0, vld1q_s8(cast[ptr int8](wa)),      vld1q_s8(cast[ptr int8](xa)))
-          a1 = vdotq_s32(a1, vld1q_s8(cast[ptr int8](wa + 16)), vld1q_s8(cast[ptr int8](xa + 16)))
-          a2 = vdotq_s32(a2, vld1q_s8(cast[ptr int8](wa + 32)), vld1q_s8(cast[ptr int8](xa + 32)))
-          a3 = vdotq_s32(a3, vld1q_s8(cast[ptr int8](wa + 48)), vld1q_s8(cast[ptr int8](xa + 48)))
-          wa += 64; xa += 64; left -= 64
+          a0 = vdotq_s32(a0, vld1q_s8(cast[ptr int8](wa)), vld1q_s8(cast[ptr int8](xa)))
+          a1 = vdotq_s32(
+            a1, vld1q_s8(cast[ptr int8](wa + 16)), vld1q_s8(cast[ptr int8](xa + 16))
+          )
+          a2 = vdotq_s32(
+            a2, vld1q_s8(cast[ptr int8](wa + 32)), vld1q_s8(cast[ptr int8](xa + 32))
+          )
+          a3 = vdotq_s32(
+            a3, vld1q_s8(cast[ptr int8](wa + 48)), vld1q_s8(cast[ptr int8](xa + 48))
+          )
+          wa += 64
+          xa += 64
+          left -= 64
         while left >= 16:
           a0 = vdotq_s32(a0, vld1q_s8(cast[ptr int8](wa)), vld1q_s8(cast[ptr int8](xa)))
-          wa += 16; xa += 16; left -= 16
+          wa += 16
+          xa += 16
+          left -= 16
         var isum = vaddvq_s32(vaddq_s32(vaddq_s32(a0, a1), vaddq_s32(a2, a3)))
         while left > 0:
           isum += int32(cast[ptr int8](wa)[]) * int32(cast[ptr int8](xa)[])
-          wa += 1; xa += 1; dec left
+          wa += 1
+          xa += 1
+          dec left
         total += applyScales(isum, wScales[row * gpr + g], xScales[g])
       y[row] = total
 
-proc dequantGemvQ8*(wq: openArray[I8]; wScales: openArray[float32]; groupSize: int;
-                    xq: openArray[I8]; xScales: openArray[float32];
-                    y: var openArray[float32]) =
+proc dequantGemvQ8*(
+    wq: openArray[I8],
+    wScales: openArray[float32],
+    groupSize: int,
+    xq: openArray[I8],
+    xScales: openArray[float32],
+    y: var openArray[float32],
+) =
   ## y[m] = Σ_g (Σ_k w·x as an exact int32) · wScale[m,g] · xScale[g], with int8
   ## weights AND int8 activations. W is M×K row-major; `wScales` is M×(K div
   ## groupSize); `xq` is length K with `xScales` of length (K div groupSize).
@@ -669,7 +774,7 @@ proc dequantGemvQ8*(wq: openArray[I8]; wScales: openArray[float32]; groupSize: i
       gemvQ8Stream(wq, wScales, groupSize, xq, xScales, y)
       return
     var row = 0
-    while row + 4 <= m:                       # ---- 4-row tile ----
+    while row + 4 <= m: # ---- 4-row tile ----
       let w0 = row * k
       let w1 = w0 + k
       let w2 = w1 + k
@@ -686,7 +791,7 @@ proc dequantGemvQ8*(wq: openArray[I8]; wScales: openArray[float32]; groupSize: i
         var kk = g * groupSize
         let gend = kk + groupSize
         while kk + 16 <= gend:
-          let xv = vld1q_s8(cast[ptr int8](unsafeAddr xq[kk]))   # loaded ONCE for 4 rows
+          let xv = vld1q_s8(cast[ptr int8](unsafeAddr xq[kk])) # loaded ONCE for 4 rows
           a0 = vdotq_s32(a0, vld1q_s8(cast[ptr int8](unsafeAddr wq[w0 + kk])), xv)
           a1 = vdotq_s32(a1, vld1q_s8(cast[ptr int8](unsafeAddr wq[w1 + kk])), xv)
           a2 = vdotq_s32(a2, vld1q_s8(cast[ptr int8](unsafeAddr wq[w2 + kk])), xv)
@@ -696,7 +801,7 @@ proc dequantGemvQ8*(wq: openArray[I8]; wScales: openArray[float32]; groupSize: i
         var s1 = vaddvq_s32(a1)
         var s2 = vaddvq_s32(a2)
         var s3 = vaddvq_s32(a3)
-        while kk < gend:                      # group tail (groupSize not a multiple of 16)
+        while kk < gend: # group tail (groupSize not a multiple of 16)
           let xvs = int32(int8(xq[kk]))
           s0 += int32(int8(wq[w0 + kk])) * xvs
           s1 += int32(int8(wq[w1 + kk])) * xvs
@@ -713,7 +818,7 @@ proc dequantGemvQ8*(wq: openArray[I8]; wScales: openArray[float32]; groupSize: i
       y[row + 2] = t2
       y[row + 3] = t3
       row += 4
-    while row < m:                            # ---- rows that don't fill a tile ----
+    while row < m: # ---- rows that don't fill a tile ----
       let wbase = row * k
       var total = 0.0'f32
       for g in 0 ..< gpr:
@@ -721,12 +826,16 @@ proc dequantGemvQ8*(wq: openArray[I8]; wScales: openArray[float32]; groupSize: i
         var kk = g * groupSize
         let gend = kk + groupSize
         while kk + 16 <= gend:
-          a0 = vdotq_s32(a0, vld1q_s8(cast[ptr int8](unsafeAddr wq[wbase + kk])),
-                             vld1q_s8(cast[ptr int8](unsafeAddr xq[kk])))
+          a0 = vdotq_s32(
+            a0,
+            vld1q_s8(cast[ptr int8](unsafeAddr wq[wbase + kk])),
+            vld1q_s8(cast[ptr int8](unsafeAddr xq[kk])),
+          )
           kk += 16
         var s0 = vaddvq_s32(a0)
         while kk < gend:
-          s0 += int32(int8(wq[wbase + kk])) * int32(int8(xq[kk])); inc kk
+          s0 += int32(int8(wq[wbase + kk])) * int32(int8(xq[kk]))
+          inc kk
         total += applyScales(s0, wScales[row * gpr + g], xScales[g])
       y[row] = total
       inc row
@@ -746,12 +855,14 @@ proc dequantGemvQ8*(wq: openArray[I8]; wScales: openArray[float32]; groupSize: i
         while kk + 32 <= gend:
           let wv = mm256_loadu_si256(cast[ptr m256i](unsafeAddr wq[wbase + kk]))
           let xv = mm256_loadu_si256(cast[ptr m256i](unsafeAddr xq[kk]))
-          let p16 = mm256_maddubs_epi16(mm256_sign_epi8(wv, wv), mm256_sign_epi8(xv, wv))
+          let p16 =
+            mm256_maddubs_epi16(mm256_sign_epi8(wv, wv), mm256_sign_epi8(xv, wv))
           acc = mm256_add_epi32(acc, mm256_madd_epi16(p16, ones))
           kk += 32
         var isum = hsum256i(acc)
         while kk < gend:
-          isum += int32(int8(wq[wbase + kk])) * int32(int8(xq[kk])); inc kk
+          isum += int32(int8(wq[wbase + kk])) * int32(int8(xq[kk]))
+          inc kk
         total += applyScales(isum, wScales[row * gpr + g], xScales[g])
       y[row] = total
   else:
@@ -767,9 +878,14 @@ proc dequantGemvQ8*(wq: openArray[I8]; wScales: openArray[float32]; groupSize: i
       y[row] = total
 
 when lpUseDotProd:
-  proc gemvI4Q8Stream(wpacked: openArray[byte]; wScales: openArray[float32]; groupSize: int;
-                      xq: openArray[I8]; xScales: openArray[float32];
-                      y: var openArray[float32]) =
+  proc gemvI4Q8Stream(
+      wpacked: openArray[byte],
+      wScales: openArray[float32],
+      groupSize: int,
+      xq: openArray[I8],
+      xScales: openArray[float32],
+      y: var openArray[float32],
+  ) =
     ## Row-at-a-time packed int4 × int8: 32 weight bytes (64 columns) per
     ## iteration, 4 SDOT chains, all loads before any unpack. Pointer-walking and
     ## deliberately NOT unrolled further — see gemvQ8Stream's shape note.
@@ -797,38 +913,66 @@ when lpUseDotProd:
           let xvB = vld2q_s8(cast[ptr int8](xa + 32))
           let pvA = vld1q_u8(cast[ptr uint8](wa))
           let pvB = vld1q_u8(cast[ptr uint8](wa + 16))
-          let loA = vshlq_s8(vshlq_s8(vreinterpretq_s8_u8(vandq_u8(pvA, m0f)), sh4pos), sh4neg)
-          let hiA = vshlq_s8(vshlq_s8(vreinterpretq_s8_u8(vshlq_u8(pvA, sh4neg)), sh4pos), sh4neg)
-          let loB = vshlq_s8(vshlq_s8(vreinterpretq_s8_u8(vandq_u8(pvB, m0f)), sh4pos), sh4neg)
-          let hiB = vshlq_s8(vshlq_s8(vreinterpretq_s8_u8(vshlq_u8(pvB, sh4neg)), sh4pos), sh4neg)
+          let loA =
+            vshlq_s8(vshlq_s8(vreinterpretq_s8_u8(vandq_u8(pvA, m0f)), sh4pos), sh4neg)
+          let hiA = vshlq_s8(
+            vshlq_s8(vreinterpretq_s8_u8(vshlq_u8(pvA, sh4neg)), sh4pos), sh4neg
+          )
+          let loB =
+            vshlq_s8(vshlq_s8(vreinterpretq_s8_u8(vandq_u8(pvB, m0f)), sh4pos), sh4neg)
+          let hiB = vshlq_s8(
+            vshlq_s8(vreinterpretq_s8_u8(vshlq_u8(pvB, sh4neg)), sh4pos), sh4neg
+          )
           a0 = vdotq_s32(a0, loA, xvA.val[0])
           a1 = vdotq_s32(a1, hiA, xvA.val[1])
           a2 = vdotq_s32(a2, loB, xvB.val[0])
           a3 = vdotq_s32(a3, hiB, xvB.val[1])
-          wa += 32; xa += 64; left -= 64
+          wa += 32
+          xa += 64
+          left -= 64
         while left >= 32:
           let xv = vld2q_s8(cast[ptr int8](xa))
           let pv = vld1q_u8(cast[ptr uint8](wa))
-          let loS = vshlq_s8(vshlq_s8(vreinterpretq_s8_u8(vandq_u8(pv, m0f)), sh4pos), sh4neg)
-          let hiS = vshlq_s8(vshlq_s8(vreinterpretq_s8_u8(vshlq_u8(pv, sh4neg)), sh4pos), sh4neg)
+          let loS =
+            vshlq_s8(vshlq_s8(vreinterpretq_s8_u8(vandq_u8(pv, m0f)), sh4pos), sh4neg)
+          let hiS = vshlq_s8(
+            vshlq_s8(vreinterpretq_s8_u8(vshlq_u8(pv, sh4neg)), sh4pos), sh4neg
+          )
           a0 = vdotq_s32(a0, loS, xv.val[0])
           a1 = vdotq_s32(a1, hiS, xv.val[1])
-          wa += 16; xa += 32; left -= 32
+          wa += 16
+          xa += 32
+          left -= 32
         var isum = vaddvq_s32(vaddq_s32(vaddq_s32(a0, a1), vaddq_s32(a2, a3)))
         var col = 0
-        while left > 0:                        # nibble tail
+        while left > 0: # nibble tail
           let b = cast[ptr uint8](wa + (col shr 1))[]
-          isum += int32(int8(fromNibble(
-            if (col and 1) == 1: b shr 4 else: b and 0x0f'u8))) *
-            int32(cast[ptr int8](xa + col)[])
-          inc col; dec left
-        wa += (col + 1) shr 1; xa += col
+          isum +=
+            int32(
+              int8(
+                fromNibble(
+                  if (col and 1) == 1:
+                    b shr 4
+                  else:
+                    b and 0x0f'u8
+                )
+              )
+            ) * int32(cast[ptr int8](xa + col)[])
+          inc col
+          dec left
+        wa += (col + 1) shr 1
+        xa += col
         total += applyScales(isum, wScales[row * gpr + g], xScales[g])
       y[row] = total
 
-proc dequantGemvI4Q8*(wpacked: openArray[byte]; wScales: openArray[float32]; groupSize: int;
-                      xq: openArray[I8]; xScales: openArray[float32];
-                      y: var openArray[float32]) =
+proc dequantGemvI4Q8*(
+    wpacked: openArray[byte],
+    wScales: openArray[float32],
+    groupSize: int,
+    xq: openArray[I8],
+    xScales: openArray[float32],
+    y: var openArray[float32],
+) =
   ## The same SDOT path over PACKED int4 weights (2 per byte, low nibble = even
   ## column). Halving the weight bytes is what actually closes the gap to
   ## llama.cpp: at 4096² the fp32-FMA int8 kernel is already at this machine's
@@ -852,9 +996,18 @@ proc dequantGemvI4Q8*(wpacked: openArray[byte]; wScales: openArray[float32]; gro
       gemvI4Q8Stream(wpacked, wScales, groupSize, xq, xScales, y)
       return
 
-  template nib(b: byte; odd: bool): int32 =
+  template nib(b: byte, odd: bool): int32 =
     ## One packed weight, sign-extended from 4 bits, for the scalar paths.
-    int32(int8(fromNibble(if odd: b shr 4 else: b and 0x0f'u8)))
+    int32(
+      int8(
+        fromNibble(
+          if odd:
+            b shr 4
+          else:
+            b and 0x0f'u8
+        )
+      )
+    )
 
   when lpUseDotProd:
     let m0f = vdupq_n_u8(0x0f'u8)
@@ -865,13 +1018,15 @@ proc dequantGemvI4Q8*(wpacked: openArray[byte]; wScales: openArray[float32]; gro
     # pre-split activations. Two SDOTs cover 32 columns of one row.
     template dotPacked(acc, wbase, kk, xv: untyped) =
       let pv = vld1q_u8(cast[ptr uint8](unsafeAddr wpacked[wbase + (kk shr 1)]))
-      let loS = vshlq_s8(vshlq_s8(vreinterpretq_s8_u8(vandq_u8(pv, m0f)), sh4pos), sh4neg)
-      let hiS = vshlq_s8(vshlq_s8(vreinterpretq_s8_u8(vshlq_u8(pv, sh4neg)), sh4pos), sh4neg)
+      let loS =
+        vshlq_s8(vshlq_s8(vreinterpretq_s8_u8(vandq_u8(pv, m0f)), sh4pos), sh4neg)
+      let hiS =
+        vshlq_s8(vshlq_s8(vreinterpretq_s8_u8(vshlq_u8(pv, sh4neg)), sh4pos), sh4neg)
       acc = vdotq_s32(acc, loS, xv.val[0])
       acc = vdotq_s32(acc, hiS, xv.val[1])
 
     var row = 0
-    while row + 4 <= m:                       # ---- 4-row tile ----
+    while row + 4 <= m: # ---- 4-row tile ----
       let b0 = row * rowBytes
       let b1 = b0 + rowBytes
       let b2 = b1 + rowBytes
@@ -887,8 +1042,8 @@ proc dequantGemvI4Q8*(wpacked: openArray[byte]; wScales: openArray[float32]; gro
         var a3 = vdupq_n_s32(0'i32)
         var kk = g * groupSize
         let gend = kk + groupSize
-        while kk + 32 <= gend:                # 16 bytes = 32 int4 columns
-          let xv = vld2q_s8(cast[ptr int8](unsafeAddr xq[kk]))   # split ONCE for 4 rows
+        while kk + 32 <= gend: # 16 bytes = 32 int4 columns
+          let xv = vld2q_s8(cast[ptr int8](unsafeAddr xq[kk])) # split ONCE for 4 rows
           dotPacked(a0, b0, kk, xv)
           dotPacked(a1, b1, kk, xv)
           dotPacked(a2, b2, kk, xv)
@@ -898,7 +1053,7 @@ proc dequantGemvI4Q8*(wpacked: openArray[byte]; wScales: openArray[float32]; gro
         var s1 = vaddvq_s32(a1)
         var s2 = vaddvq_s32(a2)
         var s3 = vaddvq_s32(a3)
-        while kk < gend:                      # group tail
+        while kk < gend: # group tail
           let odd = (kk and 1) == 1
           let bi = kk shr 1
           let xvs = int32(int8(xq[kk]))
@@ -917,7 +1072,7 @@ proc dequantGemvI4Q8*(wpacked: openArray[byte]; wScales: openArray[float32]; gro
       y[row + 2] = t2
       y[row + 3] = t3
       row += 4
-    while row < m:                            # ---- tile remainder ----
+    while row < m: # ---- tile remainder ----
       let wbase = row * rowBytes
       var total = 0.0'f32
       for g in 0 ..< gpr:
@@ -930,7 +1085,8 @@ proc dequantGemvI4Q8*(wpacked: openArray[byte]; wScales: openArray[float32]; gro
           kk += 32
         var s0 = vaddvq_s32(a0)
         while kk < gend:
-          s0 += nib(wpacked[wbase + (kk shr 1)], (kk and 1) == 1) * int32(int8(xq[kk])); inc kk
+          s0 += nib(wpacked[wbase + (kk shr 1)], (kk and 1) == 1) * int32(int8(xq[kk]))
+          inc kk
         total += applyScales(s0, wScales[row * gpr + g], xScales[g])
       y[row] = total
       inc row
@@ -942,8 +1098,8 @@ proc dequantGemvI4Q8*(wpacked: openArray[byte]; wScales: openArray[float32]; gro
     # inside the saturation bound. Bit-identical to the other paths.
     let mask0f = mm_set1_epi8(0x0f)
     let eight8 = mm_set1_epi8(8)
-    let cnt4   = mm_cvtsi32_si128(4.cint)
-    let ones   = mm256_set1_epi16(1)
+    let cnt4 = mm_cvtsi32_si128(4.cint)
+    let ones = mm256_set1_epi16(1)
     for row in 0 ..< m:
       let wbase = row * rowBytes
       var total = 0.0'f32
@@ -951,20 +1107,28 @@ proc dequantGemvI4Q8*(wpacked: openArray[byte]; wScales: openArray[float32]; gro
         var acc = mm256_setzero_si256()
         var kk = g * groupSize
         let gend = kk + groupSize
-        while kk + 32 <= gend:                     # 16 bytes = 32 columns
-          let pv  = mm_loadu_si128(cast[ptr m128i](unsafeAddr wpacked[wbase + (kk shr 1)]))
+        while kk + 32 <= gend: # 16 bytes = 32 columns
+          let pv =
+            mm_loadu_si128(cast[ptr m128i](unsafeAddr wpacked[wbase + (kk shr 1)]))
           let loS = mm_sub_epi8(mm_xor_si128(mm_and_si128(pv, mask0f), eight8), eight8)
-          let hiS = mm_sub_epi8(mm_xor_si128(
-            mm_and_si128(mm_srl_epi16(pv, cnt4), mask0f), eight8), eight8)
-          let wv = mm256_set_m128i(mm_unpackhi_epi8(loS, hiS),   # cols kk+16..kk+31
-                                   mm_unpacklo_epi8(loS, hiS))   # cols kk..kk+15
+          let hiS = mm_sub_epi8(
+            mm_xor_si128(mm_and_si128(mm_srl_epi16(pv, cnt4), mask0f), eight8), eight8
+          )
+          let wv = mm256_set_m128i(
+            mm_unpackhi_epi8(loS, hiS), # cols kk+16..kk+31
+            mm_unpacklo_epi8(loS, hiS),
+          ) # cols kk..kk+15
           let xv = mm256_loadu_si256(cast[ptr m256i](unsafeAddr xq[kk]))
-          let p16 = mm256_maddubs_epi16(mm256_sign_epi8(wv, wv), mm256_sign_epi8(xv, wv))
+          let p16 =
+            mm256_maddubs_epi16(mm256_sign_epi8(wv, wv), mm256_sign_epi8(xv, wv))
           acc = mm256_add_epi32(acc, mm256_madd_epi16(p16, ones))
           kk += 32
         var isum = hsum256i(acc)
         while kk < gend:
-          isum += nib(wpacked[wbase + (kk shr 1)], (kk and 1) == 1) * int32(int8(xq[kk])); inc kk
+          isum += nib(wpacked[wbase + (kk shr 1)], (kk and 1) == 1) * int32(
+            int8(xq[kk])
+          )
+          inc kk
         total += applyScales(isum, wScales[row * gpr + g], xScales[g])
       y[row] = total
   else:
@@ -974,10 +1138,11 @@ proc dequantGemvI4Q8*(wpacked: openArray[byte]; wScales: openArray[float32]; gro
       for g in 0 ..< gpr:
         var isum = 0'i32
         for kk in g * groupSize ..< (g + 1) * groupSize:
-          isum += nib(wpacked[wbase + (kk shr 1)], (kk and 1) == 1) * int32(int8(xq[kk]))
+          isum += nib(wpacked[wbase + (kk shr 1)], (kk and 1) == 1) * int32(
+            int8(xq[kk])
+          )
         total += applyScales(isum, wScales[row * gpr + g], xScales[g])
       y[row] = total
-
 
 # ---------------- int8-activation GEMV over ggml BLOCK layouts ----------------
 #
@@ -1000,12 +1165,14 @@ proc dequantGemvI4Q8*(wpacked: openArray[byte]; wScales: openArray[float32]; gro
 # dequantizeQ8_0Batch). Activation scales are decoded once per call.
 
 when lpUseDotProd:
-  static: doAssert sizeof(BlockQ8_0) == 34 and sizeof(BlockQ4_0) == 18
+  static:
+    doAssert sizeof(BlockQ8_0) == 34 and sizeof(BlockQ4_0) == 18
 
   proc decodeXd(xq: openArray[BlockQ8_0]): seq[float32] =
     ## The activation blocks' fp16 scales, decoded once per matvec.
     result = newSeq[float32](xq.len)
-    for i in 0 ..< xq.len: result[i] = xq[i].d.toFloat32
+    for i in 0 ..< xq.len:
+      result[i] = xq[i].d.toFloat32
 
   # decode the fp16 scales of w-blocks b, b+1, b+2, b+3 (stride `stride` bytes,
   # d at offset 0) into one float32x4 — hardware convert, exact.
@@ -1017,8 +1184,12 @@ when lpUseDotProd:
     dbuf[3] = cast[ptr uint16](base + 3 * stride)[]
     vcvt_f32_f16(vreinterpret_f16_u16(vld1_u16(addr dbuf[0])))
 
-proc dequantGemvQ8_0Q8*(w: openArray[BlockQ8_0]; blocksPerRow: int;
-                        xq: openArray[BlockQ8_0]; y: var openArray[float32]) =
+proc dequantGemvQ8_0Q8*(
+    w: openArray[BlockQ8_0],
+    blocksPerRow: int,
+    xq: openArray[BlockQ8_0],
+    y: var openArray[float32],
+) =
   ## y[m] = Σ_blocks (Σ int8·int8 exact) · wd·xd over ggml Q8_0 weights AND Q8_0
   ## activations. `w` is M×blocksPerRow row-major; `xq` is blocksPerRow blocks.
   let m = y.len
@@ -1026,7 +1197,7 @@ proc dequantGemvQ8_0Q8*(w: openArray[BlockQ8_0]; blocksPerRow: int;
   assert w.len == m * bpr
   assert xq.len == bpr
   when lpUseDotProd:
-    const WB = 34                       # sizeof BlockQ8_0
+    const WB = 34 # sizeof BlockQ8_0
     let xd = decodeXd(xq)
     let wbase0 = cast[int](unsafeAddr w[0])
     let xbase0 = cast[int](unsafeAddr xq[0])
@@ -1044,26 +1215,62 @@ proc dequantGemvQ8_0Q8*(w: openArray[BlockQ8_0]; blocksPerRow: int;
         var s3 = vdupq_n_s32(0'i32)
         # two SDOT per block; each block's 32 columns land in ONE accumulator so
         # the pairwise fold below yields per-block sums in lanes 0..3
-        s0 = vdotq_s32(vdotq_s32(s0, vld1q_s8(cast[ptr int8](wa + 2)),      vld1q_s8(cast[ptr int8](xa + 2))),
-                       vld1q_s8(cast[ptr int8](wa + 18)),      vld1q_s8(cast[ptr int8](xa + 18)))
-        s1 = vdotq_s32(vdotq_s32(s1, vld1q_s8(cast[ptr int8](wa + WB + 2)), vld1q_s8(cast[ptr int8](xa + WB + 2))),
-                       vld1q_s8(cast[ptr int8](wa + WB + 18)), vld1q_s8(cast[ptr int8](xa + WB + 18)))
-        s2 = vdotq_s32(vdotq_s32(s2, vld1q_s8(cast[ptr int8](wa + 2*WB + 2)), vld1q_s8(cast[ptr int8](xa + 2*WB + 2))),
-                       vld1q_s8(cast[ptr int8](wa + 2*WB + 18)), vld1q_s8(cast[ptr int8](xa + 2*WB + 18)))
-        s3 = vdotq_s32(vdotq_s32(s3, vld1q_s8(cast[ptr int8](wa + 3*WB + 2)), vld1q_s8(cast[ptr int8](xa + 3*WB + 2))),
-                       vld1q_s8(cast[ptr int8](wa + 3*WB + 18)), vld1q_s8(cast[ptr int8](xa + 3*WB + 18)))
+        s0 = vdotq_s32(
+          vdotq_s32(
+            s0, vld1q_s8(cast[ptr int8](wa + 2)), vld1q_s8(cast[ptr int8](xa + 2))
+          ),
+          vld1q_s8(cast[ptr int8](wa + 18)),
+          vld1q_s8(cast[ptr int8](xa + 18)),
+        )
+        s1 = vdotq_s32(
+          vdotq_s32(
+            s1,
+            vld1q_s8(cast[ptr int8](wa + WB + 2)),
+            vld1q_s8(cast[ptr int8](xa + WB + 2)),
+          ),
+          vld1q_s8(cast[ptr int8](wa + WB + 18)),
+          vld1q_s8(cast[ptr int8](xa + WB + 18)),
+        )
+        s2 = vdotq_s32(
+          vdotq_s32(
+            s2,
+            vld1q_s8(cast[ptr int8](wa + 2 * WB + 2)),
+            vld1q_s8(cast[ptr int8](xa + 2 * WB + 2)),
+          ),
+          vld1q_s8(cast[ptr int8](wa + 2 * WB + 18)),
+          vld1q_s8(cast[ptr int8](xa + 2 * WB + 18)),
+        )
+        s3 = vdotq_s32(
+          vdotq_s32(
+            s3,
+            vld1q_s8(cast[ptr int8](wa + 3 * WB + 2)),
+            vld1q_s8(cast[ptr int8](xa + 3 * WB + 2)),
+          ),
+          vld1q_s8(cast[ptr int8](wa + 3 * WB + 18)),
+          vld1q_s8(cast[ptr int8](xa + 3 * WB + 18)),
+        )
         let sums = vpaddq_s32(vpaddq_s32(s0, s1), vpaddq_s32(s2, s3))
         totals = vaddq_f32(totals, vmulq_f32(vcvtq_f32_s32(sums), vmulq_f32(wd4, xd4)))
-        wa += 4 * WB; xa += 4 * WB; bi += 4
+        wa += 4 * WB
+        xa += 4 * WB
+        bi += 4
       var tailTotals: array[4, float32]
       vst1q_f32(addr tailTotals[0], totals)
-      while bi < bpr:                    # leftover blocks -> lane (bi mod 4)
+      while bi < bpr: # leftover blocks -> lane (bi mod 4)
         var a = vdupq_n_s32(0'i32)
-        a = vdotq_s32(vdotq_s32(a, vld1q_s8(cast[ptr int8](wa + 2)), vld1q_s8(cast[ptr int8](xa + 2))),
-                      vld1q_s8(cast[ptr int8](wa + 18)), vld1q_s8(cast[ptr int8](xa + 18)))
+        a = vdotq_s32(
+          vdotq_s32(
+            a, vld1q_s8(cast[ptr int8](wa + 2)), vld1q_s8(cast[ptr int8](xa + 2))
+          ),
+          vld1q_s8(cast[ptr int8](wa + 18)),
+          vld1q_s8(cast[ptr int8](xa + 18)),
+        )
         let wd = cast[ptr F16](wa)[].toFloat32
-        tailTotals[bi and 3] = tailTotals[bi and 3] + float32(vaddvq_s32(a)) * (wd * xd[bi])
-        wa += WB; xa += WB; inc bi
+        tailTotals[bi and 3] =
+          tailTotals[bi and 3] + float32(vaddvq_s32(a)) * (wd * xd[bi])
+        wa += WB
+        xa += WB
+        inc bi
       y[row] = (tailTotals[0] + tailTotals[1]) + (tailTotals[2] + tailTotals[3])
   else:
     # Portability fallback: same arithmetic, same summation order, same bits.
@@ -1073,12 +1280,17 @@ proc dequantGemvQ8_0Q8*(w: openArray[BlockQ8_0]; blocksPerRow: int;
         var isum = 0'i32
         for i in 0 ..< QK:
           isum += int32(w[row * bpr + bi].qs[i]) * int32(xq[bi].qs[i])
-        lanes[bi and 3] = lanes[bi and 3] +
+        lanes[bi and 3] =
+          lanes[bi and 3] +
           float32(isum) * (w[row * bpr + bi].d.toFloat32 * xq[bi].d.toFloat32)
       y[row] = (lanes[0] + lanes[1]) + (lanes[2] + lanes[3])
 
-proc dequantGemvQ4_0Q8*(w: openArray[BlockQ4_0]; blocksPerRow: int;
-                        xq: openArray[BlockQ8_0]; y: var openArray[float32]) =
+proc dequantGemvQ4_0Q8*(
+    w: openArray[BlockQ4_0],
+    blocksPerRow: int,
+    xq: openArray[BlockQ8_0],
+    y: var openArray[float32],
+) =
   ## Same over ggml Q4_0 weights: value = d·(nibble−8), low nibbles are lanes
   ## 0..15 of the block, high nibbles lanes 16..31 (ggml grouped order, so the
   ## activation block needs NO de-interleave). Activations are Q8_0 blocks.
@@ -1087,7 +1299,7 @@ proc dequantGemvQ4_0Q8*(w: openArray[BlockQ4_0]; blocksPerRow: int;
   assert w.len == m * bpr
   assert xq.len == bpr
   when lpUseDotProd:
-    const WB = 18                       # sizeof BlockQ4_0
+    const WB = 18 # sizeof BlockQ4_0
     const XB = 34
     let m0f = vdupq_n_u8(0x0f'u8)
     let sh4neg = vdupq_n_s8(-4'i8)
@@ -1099,8 +1311,12 @@ proc dequantGemvQ4_0Q8*(w: openArray[BlockQ4_0]; blocksPerRow: int;
       let pv = vld1q_u8(cast[ptr uint8](wAddr + 2))
       let loV = vsubq_s8(vreinterpretq_s8_u8(vandq_u8(pv, m0f)), eight)
       let hiV = vsubq_s8(vreinterpretq_s8_u8(vshlq_u8(pv, sh4neg)), eight)
-      acc = vdotq_s32(vdotq_s32(acc, loV, vld1q_s8(cast[ptr int8](xAddr + 2))),
-                      hiV, vld1q_s8(cast[ptr int8](xAddr + 18)))
+      acc = vdotq_s32(
+        vdotq_s32(acc, loV, vld1q_s8(cast[ptr int8](xAddr + 2))),
+        hiV,
+        vld1q_s8(cast[ptr int8](xAddr + 18)),
+      )
+
     for row in 0 ..< m:
       var wa = wbase0 + row * bpr * WB
       var xa = xbase0
@@ -1113,21 +1329,26 @@ proc dequantGemvQ4_0Q8*(w: openArray[BlockQ4_0]; blocksPerRow: int;
         var s1 = vdupq_n_s32(0'i32)
         var s2 = vdupq_n_s32(0'i32)
         var s3 = vdupq_n_s32(0'i32)
-        blockDot(s0, wa,          xa)
-        blockDot(s1, wa + WB,     xa + XB)
+        blockDot(s0, wa, xa)
+        blockDot(s1, wa + WB, xa + XB)
         blockDot(s2, wa + 2 * WB, xa + 2 * XB)
         blockDot(s3, wa + 3 * WB, xa + 3 * XB)
         let sums = vpaddq_s32(vpaddq_s32(s0, s1), vpaddq_s32(s2, s3))
         totals = vaddq_f32(totals, vmulq_f32(vcvtq_f32_s32(sums), vmulq_f32(wd4, xd4)))
-        wa += 4 * WB; xa += 4 * XB; bi += 4
+        wa += 4 * WB
+        xa += 4 * XB
+        bi += 4
       var tailTotals: array[4, float32]
       vst1q_f32(addr tailTotals[0], totals)
       while bi < bpr:
         var a = vdupq_n_s32(0'i32)
         blockDot(a, wa, xa)
         let wd = cast[ptr F16](wa)[].toFloat32
-        tailTotals[bi and 3] = tailTotals[bi and 3] + float32(vaddvq_s32(a)) * (wd * xd[bi])
-        wa += WB; xa += XB; inc bi
+        tailTotals[bi and 3] =
+          tailTotals[bi and 3] + float32(vaddvq_s32(a)) * (wd * xd[bi])
+        wa += WB
+        xa += XB
+        inc bi
       y[row] = (tailTotals[0] + tailTotals[1]) + (tailTotals[2] + tailTotals[3])
   else:
     for row in 0 ..< m:
@@ -1138,10 +1359,10 @@ proc dequantGemvQ4_0Q8*(w: openArray[BlockQ4_0]; blocksPerRow: int;
           let b = w[row * bpr + bi].qs[i]
           isum += (int32(b and 0x0f'u8) - 8) * int32(xq[bi].qs[i])
           isum += (int32(b shr 4) - 8) * int32(xq[bi].qs[i + QK div 2])
-        lanes[bi and 3] = lanes[bi and 3] +
+        lanes[bi and 3] =
+          lanes[bi and 3] +
           float32(isum) * (w[row * bpr + bi].d.toFloat32 * xq[bi].d.toFloat32)
       y[row] = (lanes[0] + lanes[1]) + (lanes[2] + lanes[3])
-
 
 # ---------------- multi-column GEMM (n>1), int8 activations ----------------
 #
@@ -1158,9 +1379,15 @@ proc dequantGemvQ4_0Q8*(w: openArray[BlockQ4_0]; blocksPerRow: int;
 # is n×gpr column-major (c*gpr + g); `y` is M×n ROW-major (y[row*n + c]), so a
 # row range — the unit of thread sharding — is a contiguous block.
 
-proc dequantGemmQ8*(wq: openArray[I8]; wScales: openArray[float32]; groupSize: int;
-                    xq: openArray[I8]; xScales: openArray[float32]; n: int;
-                    y: var openArray[float32]) =
+proc dequantGemmQ8*(
+    wq: openArray[I8],
+    wScales: openArray[float32],
+    groupSize: int,
+    xq: openArray[I8],
+    xScales: openArray[float32],
+    n: int,
+    y: var openArray[float32],
+) =
   ## y[row·n + c] = Σ_g (Σ_k w·x_c exact int32) · wScale[row,g] · xScale[c,g].
   let m = y.len div n
   let k = xq.len div n
@@ -1177,7 +1404,7 @@ proc dequantGemmQ8*(wq: openArray[I8]; wScales: openArray[float32]; groupSize: i
     for row in 0 ..< m:
       let wrow = wbase0 + row * k
       for g in 0 ..< gpr:
-        let wg = wrow + g * groupSize        # this group's weights: L1-hot across columns
+        let wg = wrow + g * groupSize # this group's weights: L1-hot across columns
         let ws = wScales[row * gpr + g]
         for c in 0 ..< n:
           var xa = xbase0 + c * k + g * groupSize
@@ -1188,21 +1415,37 @@ proc dequantGemmQ8*(wq: openArray[I8]; wScales: openArray[float32]; groupSize: i
           var a3 = vdupq_n_s32(0'i32)
           var left = groupSize
           while left >= 64:
-            a0 = vdotq_s32(a0, vld1q_s8(cast[ptr int8](wa)),      vld1q_s8(cast[ptr int8](xa)))
-            a1 = vdotq_s32(a1, vld1q_s8(cast[ptr int8](wa + 16)), vld1q_s8(cast[ptr int8](xa + 16)))
-            a2 = vdotq_s32(a2, vld1q_s8(cast[ptr int8](wa + 32)), vld1q_s8(cast[ptr int8](xa + 32)))
-            a3 = vdotq_s32(a3, vld1q_s8(cast[ptr int8](wa + 48)), vld1q_s8(cast[ptr int8](xa + 48)))
-            wa += 64; xa += 64; left -= 64
+            a0 =
+              vdotq_s32(a0, vld1q_s8(cast[ptr int8](wa)), vld1q_s8(cast[ptr int8](xa)))
+            a1 = vdotq_s32(
+              a1, vld1q_s8(cast[ptr int8](wa + 16)), vld1q_s8(cast[ptr int8](xa + 16))
+            )
+            a2 = vdotq_s32(
+              a2, vld1q_s8(cast[ptr int8](wa + 32)), vld1q_s8(cast[ptr int8](xa + 32))
+            )
+            a3 = vdotq_s32(
+              a3, vld1q_s8(cast[ptr int8](wa + 48)), vld1q_s8(cast[ptr int8](xa + 48))
+            )
+            wa += 64
+            xa += 64
+            left -= 64
           while left >= 16:
-            a0 = vdotq_s32(a0, vld1q_s8(cast[ptr int8](wa)), vld1q_s8(cast[ptr int8](xa)))
-            wa += 16; xa += 16; left -= 16
+            a0 =
+              vdotq_s32(a0, vld1q_s8(cast[ptr int8](wa)), vld1q_s8(cast[ptr int8](xa)))
+            wa += 16
+            xa += 16
+            left -= 16
           var isum = vaddvq_s32(vaddq_s32(vaddq_s32(a0, a1), vaddq_s32(a2, a3)))
           while left > 0:
             isum += int32(cast[ptr int8](wa)[]) * int32(cast[ptr int8](xa)[])
-            wa += 1; xa += 1; dec left
+            wa += 1
+            xa += 1
+            dec left
           let term = applyScales(isum, ws, xScales[c * gpr + g])
-          if g == 0: y[row * n + c] = term
-          else:      y[row * n + c] = y[row * n + c] + term
+          if g == 0:
+            y[row * n + c] = term
+          else:
+            y[row * n + c] = y[row * n + c] + term
   else:
     for row in 0 ..< m:
       for c in 0 ..< n:
@@ -1214,9 +1457,15 @@ proc dequantGemmQ8*(wq: openArray[I8]; wScales: openArray[float32]; groupSize: i
           total += applyScales(isum, wScales[row * gpr + g], xScales[c * gpr + g])
         y[row * n + c] = total
 
-proc dequantGemmI4Q8*(wpacked: openArray[byte]; wScales: openArray[float32]; groupSize: int;
-                      xq: openArray[I8]; xScales: openArray[float32]; n: int;
-                      y: var openArray[float32]) =
+proc dequantGemmI4Q8*(
+    wpacked: openArray[byte],
+    wScales: openArray[float32],
+    groupSize: int,
+    xq: openArray[I8],
+    xScales: openArray[float32],
+    n: int,
+    y: var openArray[float32],
+) =
   ## The same over PACKED int4 weights (2 per byte, low nibble = even column).
   ## Same layouts and the same bit-for-bit-per-column guarantee.
   let m = y.len div n
@@ -1254,48 +1503,84 @@ proc dequantGemmI4Q8*(wpacked: openArray[byte]; wScales: openArray[float32]; gro
             let xvB = vld2q_s8(cast[ptr int8](xa + 32))
             let pvA = vld1q_u8(cast[ptr uint8](wa))
             let pvB = vld1q_u8(cast[ptr uint8](wa + 16))
-            let loA = vshlq_s8(vshlq_s8(vreinterpretq_s8_u8(vandq_u8(pvA, m0f)), sh4pos), sh4neg)
-            let hiA = vshlq_s8(vshlq_s8(vreinterpretq_s8_u8(vshlq_u8(pvA, sh4neg)), sh4pos), sh4neg)
-            let loB = vshlq_s8(vshlq_s8(vreinterpretq_s8_u8(vandq_u8(pvB, m0f)), sh4pos), sh4neg)
-            let hiB = vshlq_s8(vshlq_s8(vreinterpretq_s8_u8(vshlq_u8(pvB, sh4neg)), sh4pos), sh4neg)
+            let loA = vshlq_s8(
+              vshlq_s8(vreinterpretq_s8_u8(vandq_u8(pvA, m0f)), sh4pos), sh4neg
+            )
+            let hiA = vshlq_s8(
+              vshlq_s8(vreinterpretq_s8_u8(vshlq_u8(pvA, sh4neg)), sh4pos), sh4neg
+            )
+            let loB = vshlq_s8(
+              vshlq_s8(vreinterpretq_s8_u8(vandq_u8(pvB, m0f)), sh4pos), sh4neg
+            )
+            let hiB = vshlq_s8(
+              vshlq_s8(vreinterpretq_s8_u8(vshlq_u8(pvB, sh4neg)), sh4pos), sh4neg
+            )
             a0 = vdotq_s32(a0, loA, xvA.val[0])
             a1 = vdotq_s32(a1, hiA, xvA.val[1])
             a2 = vdotq_s32(a2, loB, xvB.val[0])
             a3 = vdotq_s32(a3, hiB, xvB.val[1])
-            wa += 32; xa += 64; left -= 64
+            wa += 32
+            xa += 64
+            left -= 64
           while left >= 32:
             let xv = vld2q_s8(cast[ptr int8](xa))
             let pv = vld1q_u8(cast[ptr uint8](wa))
-            let loS = vshlq_s8(vshlq_s8(vreinterpretq_s8_u8(vandq_u8(pv, m0f)), sh4pos), sh4neg)
-            let hiS = vshlq_s8(vshlq_s8(vreinterpretq_s8_u8(vshlq_u8(pv, sh4neg)), sh4pos), sh4neg)
+            let loS =
+              vshlq_s8(vshlq_s8(vreinterpretq_s8_u8(vandq_u8(pv, m0f)), sh4pos), sh4neg)
+            let hiS = vshlq_s8(
+              vshlq_s8(vreinterpretq_s8_u8(vshlq_u8(pv, sh4neg)), sh4pos), sh4neg
+            )
             a0 = vdotq_s32(a0, loS, xv.val[0])
             a1 = vdotq_s32(a1, hiS, xv.val[1])
-            wa += 16; xa += 32; left -= 32
+            wa += 16
+            xa += 32
+            left -= 32
           var isum = vaddvq_s32(vaddq_s32(vaddq_s32(a0, a1), vaddq_s32(a2, a3)))
           var col = 0
           while left > 0:
             let b = cast[ptr uint8](wa + (col shr 1))[]
-            isum += int32(int8(fromNibble(
-              if (col and 1) == 1: b shr 4 else: b and 0x0f'u8))) *
-              int32(cast[ptr int8](xa + col)[])
-            inc col; dec left
+            isum +=
+              int32(
+                int8(
+                  fromNibble(
+                    if (col and 1) == 1:
+                      b shr 4
+                    else:
+                      b and 0x0f'u8
+                  )
+                )
+              ) * int32(cast[ptr int8](xa + col)[])
+            inc col
+            dec left
           let term = applyScales(isum, ws, xScales[c * gpr + g])
-          if g == 0: y[row * n + c] = term
-          else:      y[row * n + c] = y[row * n + c] + term
+          if g == 0:
+            y[row * n + c] = term
+          else:
+            y[row * n + c] = y[row * n + c] + term
   else:
-    template nib(b: byte; odd: bool): int32 =
-      int32(int8(fromNibble(if odd: b shr 4 else: b and 0x0f'u8)))
+    template nib(b: byte, odd: bool): int32 =
+      int32(
+        int8(
+          fromNibble(
+            if odd:
+              b shr 4
+            else:
+              b and 0x0f'u8
+          )
+        )
+      )
+
     for row in 0 ..< m:
       for c in 0 ..< n:
         var total = 0.0'f32
         for g in 0 ..< gpr:
           var isum = 0'i32
           for kk in g * groupSize ..< (g + 1) * groupSize:
-            isum += nib(wpacked[row * rowBytes + (kk shr 1)], (kk and 1) == 1) *
-                    int32(int8(xq[c * k + kk]))
+            isum +=
+              nib(wpacked[row * rowBytes + (kk shr 1)], (kk and 1) == 1) *
+              int32(int8(xq[c * k + kk]))
           total += applyScales(isum, wScales[row * gpr + g], xScales[c * gpr + g])
         y[row * n + c] = total
-
 
 # ---------------- quantize direction (elementwise, bit-exact vs scalar) ----------------
 #
@@ -1314,12 +1599,14 @@ when lpUseNeon:
 
   # 16 floats at `src+i` scaled by idv, rounded/clamped, narrowed to int8x16
   template quant16(src, i, idv, lo, hi: untyped): int8x16 =
-    let r0 = rndClamp(vmulq_f32(vld1q_f32(unsafeAddr src[i]),      idv), lo, hi)
-    let r1 = rndClamp(vmulq_f32(vld1q_f32(unsafeAddr src[i + 4]),  idv), lo, hi)
-    let r2 = rndClamp(vmulq_f32(vld1q_f32(unsafeAddr src[i + 8]),  idv), lo, hi)
+    let r0 = rndClamp(vmulq_f32(vld1q_f32(unsafeAddr src[i]), idv), lo, hi)
+    let r1 = rndClamp(vmulq_f32(vld1q_f32(unsafeAddr src[i + 4]), idv), lo, hi)
+    let r2 = rndClamp(vmulq_f32(vld1q_f32(unsafeAddr src[i + 8]), idv), lo, hi)
     let r3 = rndClamp(vmulq_f32(vld1q_f32(unsafeAddr src[i + 12]), idv), lo, hi)
-    vcombine_s8(vmovn_s16(vcombine_s16(vmovn_s32(r0), vmovn_s32(r1))),
-                vmovn_s16(vcombine_s16(vmovn_s32(r2), vmovn_s32(r3))))
+    vcombine_s8(
+      vmovn_s16(vcombine_s16(vmovn_s32(r0), vmovn_s32(r1))),
+      vmovn_s16(vcombine_s16(vmovn_s32(r2), vmovn_s32(r3))),
+    )
 
   template absMax32(src, o: untyped): float32 =
     ## |·|-max of 32 floats. Max is order-independent, so the vector reduce is
@@ -1334,7 +1621,7 @@ when lpUseNeon:
     mx = vmaxq_f32(mx, vabsq_f32(vld1q_f32(unsafeAddr src[o + 28])))
     vmaxvq_f32(mx)
 
-proc quantizeQ8_0Batch*(src: openArray[float32]; blocks: var openArray[BlockQ8_0]) =
+proc quantizeQ8_0Batch*(src: openArray[float32], blocks: var openArray[BlockQ8_0]) =
   ## Vector form of `quantizeQ8_0` — bit-exact (same amax, same d, same
   ## multiply-by-inverse, same ties-away rounding, same clamp).
   assert src.len == blocks.len * QK
@@ -1346,12 +1633,14 @@ proc quantizeQ8_0Batch*(src: openArray[float32]; blocks: var openArray[BlockQ8_0
       let id = (if d != 0.0'f32: 1.0'f32 / d else: 0.0'f32)
       blocks[bi].d = toF16(d)
       let idv = vdupq_n_f32(id)
-      vst1q_s8(cast[ptr int8](addr blocks[bi].qs[0]),  quant16(src, o, idv, -127, 127))
-      vst1q_s8(cast[ptr int8](addr blocks[bi].qs[16]), quant16(src, o + 16, idv, -127, 127))
+      vst1q_s8(cast[ptr int8](addr blocks[bi].qs[0]), quant16(src, o, idv, -127, 127))
+      vst1q_s8(
+        cast[ptr int8](addr blocks[bi].qs[16]), quant16(src, o + 16, idv, -127, 127)
+      )
   else:
     quantizeQ8_0(src, blocks)
 
-proc quantizeQ4_0Batch*(src: openArray[float32]; blocks: var openArray[BlockQ4_0]) =
+proc quantizeQ4_0Batch*(src: openArray[float32], blocks: var openArray[BlockQ4_0]) =
   ## Vector form of `quantizeQ4_0`. The max-|·|-KEEPING-SIGN search stays scalar
   ## on purpose: the scalar loop's "first strict > wins" tie rule is
   ## order-dependent, and a lane-parallel search can pick a different (equal-|·|,
@@ -1365,7 +1654,8 @@ proc quantizeQ4_0Batch*(src: openArray[float32]; blocks: var openArray[BlockQ4_0
       for i in 0 ..< QK:
         let v = src[o + i]
         if abs(v) > amax:
-          amax = abs(v); vmax = v
+          amax = abs(v)
+          vmax = v
       let d = vmax / -8.0'f32
       let id = (if d != 0.0'f32: 1.0'f32 / d else: 0.0'f32)
       blocks[bi].d = toF16(d)
@@ -1374,20 +1664,57 @@ proc quantizeQ4_0Batch*(src: openArray[float32]; blocks: var openArray[BlockQ4_0
       # ADD 8, clamp in int32, narrow. Then byte = q0 | (q1 shl 4) lanewise.
       template q16(base: untyped): int8x16 =
         let e8 = vdupq_n_s32(8'i32)
-        let r0 = vminq_s32(vmaxq_s32(vaddq_s32(vcvtaq_s32_f32(vmulq_f32(vld1q_f32(unsafeAddr src[base]),      idv)), e8), vdupq_n_s32(0)), vdupq_n_s32(15))
-        let r1 = vminq_s32(vmaxq_s32(vaddq_s32(vcvtaq_s32_f32(vmulq_f32(vld1q_f32(unsafeAddr src[base + 4]),  idv)), e8), vdupq_n_s32(0)), vdupq_n_s32(15))
-        let r2 = vminq_s32(vmaxq_s32(vaddq_s32(vcvtaq_s32_f32(vmulq_f32(vld1q_f32(unsafeAddr src[base + 8]),  idv)), e8), vdupq_n_s32(0)), vdupq_n_s32(15))
-        let r3 = vminq_s32(vmaxq_s32(vaddq_s32(vcvtaq_s32_f32(vmulq_f32(vld1q_f32(unsafeAddr src[base + 12]), idv)), e8), vdupq_n_s32(0)), vdupq_n_s32(15))
-        vcombine_s8(vmovn_s16(vcombine_s16(vmovn_s32(r0), vmovn_s32(r1))),
-                    vmovn_s16(vcombine_s16(vmovn_s32(r2), vmovn_s32(r3))))
-      let lo = vreinterpretq_u8_s8(q16(o))            # lanes 0..15  -> low nibbles
-      let hi = vreinterpretq_u8_s8(q16(o + 16))       # lanes 16..31 -> high nibbles
-      vst1q_u8(cast[ptr uint8](addr blocks[bi].qs[0]), vorrq_u8(lo, vshlq_u8(hi, vdupq_n_s8(4'i8))))
+        let r0 = vminq_s32(
+          vmaxq_s32(
+            vaddq_s32(
+              vcvtaq_s32_f32(vmulq_f32(vld1q_f32(unsafeAddr src[base]), idv)), e8
+            ),
+            vdupq_n_s32(0),
+          ),
+          vdupq_n_s32(15),
+        )
+        let r1 = vminq_s32(
+          vmaxq_s32(
+            vaddq_s32(
+              vcvtaq_s32_f32(vmulq_f32(vld1q_f32(unsafeAddr src[base + 4]), idv)), e8
+            ),
+            vdupq_n_s32(0),
+          ),
+          vdupq_n_s32(15),
+        )
+        let r2 = vminq_s32(
+          vmaxq_s32(
+            vaddq_s32(
+              vcvtaq_s32_f32(vmulq_f32(vld1q_f32(unsafeAddr src[base + 8]), idv)), e8
+            ),
+            vdupq_n_s32(0),
+          ),
+          vdupq_n_s32(15),
+        )
+        let r3 = vminq_s32(
+          vmaxq_s32(
+            vaddq_s32(
+              vcvtaq_s32_f32(vmulq_f32(vld1q_f32(unsafeAddr src[base + 12]), idv)), e8
+            ),
+            vdupq_n_s32(0),
+          ),
+          vdupq_n_s32(15),
+        )
+        vcombine_s8(
+          vmovn_s16(vcombine_s16(vmovn_s32(r0), vmovn_s32(r1))),
+          vmovn_s16(vcombine_s16(vmovn_s32(r2), vmovn_s32(r3))),
+        )
+
+      let lo = vreinterpretq_u8_s8(q16(o)) # lanes 0..15  -> low nibbles
+      let hi = vreinterpretq_u8_s8(q16(o + 16)) # lanes 16..31 -> high nibbles
+      vst1q_u8(
+        cast[ptr uint8](addr blocks[bi].qs[0]),
+        vorrq_u8(lo, vshlq_u8(hi, vdupq_n_s8(4'i8))),
+      )
   else:
     quantizeQ4_0(src, blocks)
 
-
-proc quantizeBatch*(x: openArray[float32]; p: QParams; dst: var openArray[I8]) =
+proc quantizeBatch*(x: openArray[float32], p: QParams, dst: var openArray[I8]) =
   ## Vector form of `quantize[I8]` for the symmetric case — the activation-side
   ## encode ahead of every int8-SDOT matvec. Bit-exact: the scalar path DIVIDES
   ## (`x / scale`), so this divides too (`vdivq_f32`), then rounds ties-away and
@@ -1407,13 +1734,16 @@ proc quantizeBatch*(x: openArray[float32]; p: QParams; dst: var openArray[I8]) =
         while i + 16 <= hi:
           template r4(off: untyped): int32x4 =
             rndClamp(vdivq_f32(vld1q_f32(unsafeAddr x[i + off]), sv), -128, 127)
+
           let v = vcombine_s8(
             vmovn_s16(vcombine_s16(vmovn_s32(r4(0)), vmovn_s32(r4(4)))),
-            vmovn_s16(vcombine_s16(vmovn_s32(r4(8)), vmovn_s32(r4(12)))))
+            vmovn_s16(vcombine_s16(vmovn_s32(r4(8)), vmovn_s32(r4(12)))),
+          )
           vst1q_s8(cast[ptr int8](addr dst[i]), v)
           i += 16
         while i < hi:
-          dst[i] = toI8(x[i] / p.scale[if p.scheme == qPerTensor: 0 else: g]); inc i
+          dst[i] = toI8(x[i] / p.scale[if p.scheme == qPerTensor: 0 else: g])
+          inc i
         base = hi
         inc g
       return

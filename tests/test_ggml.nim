@@ -5,11 +5,11 @@ import std/[unittest, math]
 import nim_lowprec/[float16, ggml]
 
 suite "ggml block formats":
-
   test "Q8_0 dequant is d·q (hand-built block)":
     var blk: BlockQ8_0
     blk.d = toF16(0.5'f32)
-    for i in 0 ..< QK: blk.qs[i] = int8(i - 16)          # -16 .. 15
+    for i in 0 ..< QK:
+      blk.qs[i] = int8(i - 16) # -16 .. 15
     var dst = newSeq[float32](QK)
     dequantizeQ8_0([blk], dst)
     for i in 0 ..< QK:
@@ -19,11 +19,11 @@ suite "ggml block formats":
     var blk: BlockQ4_0
     blk.d = toF16(2.0'f32)
     for i in 0 ..< QK div 2:
-      blk.qs[i] = uint8(i or ((15 - i) shl 4))            # low nibble = i, high = 15-i
+      blk.qs[i] = uint8(i or ((15 - i) shl 4)) # low nibble = i, high = 15-i
     var dst = newSeq[float32](QK)
     dequantizeQ4_0([blk], dst)
     for i in 0 ..< QK div 2:
-      check dst[i]            == 2.0'f32 * float32(i - 8)
+      check dst[i] == 2.0'f32 * float32(i - 8)
       check dst[i + QK div 2] == 2.0'f32 * float32((15 - i) - 8)
 
   test "Q8_0 quantize→dequantize within one step":
@@ -39,7 +39,8 @@ suite "ggml block formats":
     dequantizeQ8_0(blocks, y)
     for b in 0 ..< NB:
       var amax = 0.0'f32
-      for i in 0 ..< QK: amax = max(amax, abs(x[b * QK + i]))
+      for i in 0 ..< QK:
+        amax = max(amax, abs(x[b * QK + i]))
       let step = amax / 127.0'f32
       for i in 0 ..< QK:
         check abs(y[b * QK + i] - x[b * QK + i]) <= step + amax * 5e-3'f32 + 1e-5'f32
@@ -57,7 +58,8 @@ suite "ggml block formats":
     dequantizeQ4_0(blocks, y)
     for b in 0 ..< NB:
       var amax = 0.0'f32
-      for i in 0 ..< QK: amax = max(amax, abs(x[b * QK + i]))
-      let step = amax / 8.0'f32                            # 4-bit resolution
+      for i in 0 ..< QK:
+        amax = max(amax, abs(x[b * QK + i]))
+      let step = amax / 8.0'f32 # 4-bit resolution
       for i in 0 ..< QK:
         check abs(y[b * QK + i] - x[b * QK + i]) <= step + amax * 5e-3'f32 + 1e-5'f32

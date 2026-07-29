@@ -17,20 +17,23 @@ const N = 16_000_000
 const mid = N div 2
 
 var f = newSeq[float32](N)
-for i in 0 ..< N: f[i] = float32(i and 0xffff) * 0.01'f32 - 300.0'f32
+for i in 0 ..< N:
+  f[i] = float32(i and 0xffff) * 0.01'f32 - 300.0'f32
 var wide = newSeq[float32](N)
 
 template defNarrowRef(name, T, encode: untyped) =
   ## A direct call, not a `proc` value: an indirect call per element would skew
   ## the comparison as badly in the other direction.
-  proc name(src: openArray[float32]; dst: var openArray[T]) =
-    for i in 0 ..< src.len: dst[i] = encode(src[i])
+  proc name(src: openArray[float32], dst: var openArray[T]) =
+    for i in 0 ..< src.len:
+      dst[i] = encode(src[i])
 
 defNarrowRef(bf16Ref, BF16, toBF16)
 defNarrowRef(f16Ref, F16, toF16)
 
-proc widenRef[T](src: openArray[T]; dst: var openArray[float32]) =
-  for i in 0 ..< src.len: dst[i] = toFloat32(src[i])
+proc widenRef[T](src: openArray[T], dst: var openArray[float32]) =
+  for i in 0 ..< src.len:
+    dst[i] = toFloat32(src[i])
 
 header "batch conversions"
 
@@ -72,7 +75,7 @@ block: # ---- fp16: hardware vcvt (NEON) / F16C (AVX2) ----
 # tinyfloat core), while the kernel repacks the byte into an fp16 field and lets
 # the hardware convert. Read them as "vectorized decode vs the scalar decode a
 # caller actually gets today", not as a pure lane-width win.
-template f8Bench(TT: untyped; nm: string) =
+template f8Bench(TT: untyped, nm: string) =
   block:
     var src = newSeq[TT](N)
     for i in 0 ..< N:
@@ -92,12 +95,13 @@ f8Bench(F8E4M3FNUZ, "fp8 e4m3fnuz")
 f8Bench(F8E5M2FNUZ, "fp8 e5m2fnuz")
 
 # ---- fp8 ENCODE: round-to-odd f16 + 64 KB LUT vs the scalar encoder ----
-template f8EncBench(TT, toFn, batchFn: untyped; nm: string) =
+template f8EncBench(TT, toFn, batchFn: untyped, nm: string) =
   block:
     var dst8 = newSeq[TT](N)
     var g = elemGroup("f32 -> " & nm, N)
     g.scalarRow float(uint8(dst8[mid])):
-      for i in 0 ..< N: dst8[i] = toFn(f[i])
+      for i in 0 ..< N:
+        dst8[i] = toFn(f[i])
     g.kernelRow float(uint8(dst8[mid])):
       batchFn(f, dst8)
     g.report()

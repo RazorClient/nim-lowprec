@@ -34,11 +34,13 @@ import ./mxfloat, ./float8
 # oracle: no compiler-invented FMAs (same policy as simd/dequant).
 {.localPassc: "-ffp-contract=off".}
 
-const nvfp4BlockLen* = 16   ## NVFP4 block length (vs 32 for MX)
+const nvfp4BlockLen* = 16 ## NVFP4 block length (vs 32 for MX)
 
-proc quantizeNVFP4*(x: openArray[float32];
-                    codes: var openArray[F4E2M1];
-                    blockScales: var openArray[F8E4M3]): float32 =
+proc quantizeNVFP4*(
+    x: openArray[float32],
+    codes: var openArray[F4E2M1],
+    blockScales: var openArray[F8E4M3],
+): float32 =
   ## Quantize `x` (length a multiple of 16) to NVFP4. Fills one E2M1 code per
   ## element and one E4M3 decode scale per 16-element block; returns the
   ## per-tensor GLOBAL DECODE SCALE (keep all three to dequantize).
@@ -50,9 +52,11 @@ proc quantizeNVFP4*(x: openArray[float32];
   var gamax = 0.0'f32
   for v in x:
     let a = abs(v)
-    if a > gamax: gamax = a
-  var ges = min(2688.0'f32 / gamax, F32MAX)          # 448 · 6
-  if ges == 0.0'f32: ges = 1.0'f32
+    if a > gamax:
+      gamax = a
+  var ges = min(2688.0'f32 / gamax, F32MAX) # 448 · 6
+  if ges == 0.0'f32:
+    ges = 1.0'f32
   let gds = 1.0'f32 / ges
   let mult = ges * (1.0'f32 / 6.0'f32)
   for b in 0 ..< blockScales.len:
@@ -60,7 +64,8 @@ proc quantizeNVFP4*(x: openArray[float32];
     var vmax = 0.0'f32
     for i in lo ..< lo + nvfp4BlockLen:
       let a = abs(x[i])
-      if a > vmax: vmax = a
+      if a > vmax:
+        vmax = a
     let ds = clamp(min(vmax * mult, F32MAX), -448.0'f32, 448.0'f32)
     let ds8 = toF8E4M3(ds)
     blockScales[b] = ds8
@@ -71,10 +76,12 @@ proc quantizeNVFP4*(x: openArray[float32];
       codes[i] = (if scaled == 0.0'f32: F4E2M1(0) else: toF4E2M1(scaled))
   gds
 
-proc dequantizeNVFP4*(codes: openArray[F4E2M1];
-                      blockScales: openArray[F8E4M3];
-                      globalDecodeScale: float32;
-                      dst: var openArray[float32]) =
+proc dequantizeNVFP4*(
+    codes: openArray[F4E2M1],
+    blockScales: openArray[F8E4M3],
+    globalDecodeScale: float32,
+    dst: var openArray[float32],
+) =
   ## x̂ = (value(code) · value(blockScale)) · globalDecodeScale.
   assert dst.len == codes.len
   assert blockScales.len * nvfp4BlockLen == codes.len

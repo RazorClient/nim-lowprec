@@ -19,13 +19,13 @@ import std/math
 import ./common, ./tinyfloat
 
 type
-  F4E2M1* = distinct uint8   ## MXFP4 e2m1 (value in low 4 bits)
-  F6E2M3* = distinct uint8   ## MXFP6 e2m3 (value in low 6 bits)
-  F6E3M2* = distinct uint8   ## MXFP6 e3m2 (value in low 6 bits)
-  E8M0*   = distinct uint8   ## MX shared scale: 2^(b-127), 0xFF = NaN
+  F4E2M1* = distinct uint8 ## MXFP4 e2m1 (value in low 4 bits)
+  F6E2M3* = distinct uint8 ## MXFP6 e2m3 (value in low 6 bits)
+  F6E3M2* = distinct uint8 ## MXFP6 e3m2 (value in low 6 bits)
+  E8M0* = distinct uint8 ## MX shared scale: 2^(b-127), 0xFF = NaN
 
   MxFmt = object
-    ebits, mbits, bias, cmax: int   ## cmax = largest positive finite code
+    ebits, mbits, bias, cmax: int ## cmax = largest positive finite code
 
 const
   fmtF4E2M1 = MxFmt(ebits: 2, mbits: 1, bias: 1, cmax: 0x07)
@@ -42,30 +42,44 @@ func mxDecode(u: uint8, f: MxFmt): float32 =
   let sbit = 1 shl (f.ebits + f.mbits)
   let neg = (int(u) and sbit) != 0
   let mag = mxMag(int(u) and (sbit - 1), f)
-  float32(if neg: -mag else: mag)
+  float32(
+    if neg:
+      -mag
+    else:
+      mag
+  )
 
 func mxEncode(x: float32, f: MxFmt): uint8 =
   let sbit = uint8(1 shl (f.ebits + f.mbits))
   let xb = cast[uint32](x)
   let sign = (if (xb shr 31) != 0'u32: sbit else: 0'u8)
   let a = abs(x.float64)
-  if a != a: return 0'u8                          # NaN: unrepresentable → 0 (sane default)
+  if a != a:
+    return 0'u8 # NaN: unrepresentable → 0 (sane default)
   let vmax = mxMag(f.cmax, f)
-  if a >= vmax: return sign or uint8(f.cmax)       # SATURATE (also catches +Inf)
+  if a >= vmax:
+    return sign or uint8(f.cmax) # SATURATE (also catches +Inf)
   # nearest finite code in [0, cmax], round-to-nearest-even (shared core)
   let code = nearestCode(a, f.ebits, f.mbits, f.bias, f.cmax)
-  if code == 0: return sign                          # rounds to zero
+  if code == 0:
+    return sign # rounds to zero
   sign or uint8(code)
 
 # ---- generate the three float formats' API surface via one template ----
 
 template defMx(T, toFn, FMT, BITS, DT: untyped) =
-  func bits*(x: T): uint8 {.inline.} = uint8(x)
-  func toFloat32*(x: T): float32 {.inline.} = mxDecode(uint8(x), FMT)
-  func toFn*(x: float32): T {.inline.} = T(mxEncode(x, FMT))
-  func toFn*(x: float64): T {.inline.} = toFn(x.float32)
-  func isNaN*(x: T): bool {.inline.} = false          # finite-only
-  func isInf*(x: T): bool {.inline.} = false
+  func bits*(x: T): uint8 {.inline.} =
+    uint8(x)
+  func toFloat32*(x: T): float32 {.inline.} =
+    mxDecode(uint8(x), FMT)
+  func toFn*(x: float32): T {.inline.} =
+    T(mxEncode(x, FMT))
+  func toFn*(x: float64): T {.inline.} =
+    toFn(x.float32)
+  func isNaN*(x: T): bool {.inline.} =
+    false # finite-only
+  func isInf*(x: T): bool {.inline.} =
+    false
   func signbit*(x: T): bool {.inline.} =
     (uint8(x) and uint8(1 shl (FMT.ebits + FMT.mbits))) != 0'u8
   defFloatOps(T, toFn, BITS, DT)
@@ -76,13 +90,16 @@ defMx(F6E3M2, toF6E3M2, fmtF6E3M2, 6, dtF6E3M2)
 
 # ---- E8M0 shared scale (pure exponent; no sign, no zero, 0xFF = NaN) ----
 
-func bits*(x: E8M0): uint8 {.inline.} = uint8(x)
+func bits*(x: E8M0): uint8 {.inline.} =
+  uint8(x)
 
 func toFloat32*(x: E8M0): float32 {.inline.} =
   let u = uint8(x)
-  if u == 0xff'u8: return cast[float32](0x7fc0_0000'u32)   # NaN
-  if u == 0x00'u8: return cast[float32](0x0040_0000'u32)   # 2^-127 (subnormal)
-  cast[float32](uint32(u) shl 23)                          # 2^(u-127)
+  if u == 0xff'u8:
+    return cast[float32](0x7fc0_0000'u32) # NaN
+  if u == 0x00'u8:
+    return cast[float32](0x0040_0000'u32) # 2^-127 (subnormal)
+  cast[float32](uint32(u) shl 23) # 2^(u-127)
 
 func toE8M0*(x: float32): E8M0 =
   ## Round to nearest power of two (linear midpoint 1.5·2^k, ties up).
@@ -91,24 +108,34 @@ func toE8M0*(x: float32): E8M0 =
   ## float32-SUBNORMAL inputs (~1e-39) we round true-nearest, where ml_dtypes
   ## rounds up — E8M0 is a scale and never sees such inputs in practice.
   let a = abs(x.float64)
-  if x != x or a == 0.0 or a == Inf: return E8M0(0xff'u8)
-  let (frac, exp) = frexp(a)                # a = frac·2^exp, frac ∈ [0.5, 1)
+  if x != x or a == 0.0 or a == Inf:
+    return E8M0(0xff'u8)
+  let (frac, exp) = frexp(a) # a = frac·2^exp, frac ∈ [0.5, 1)
   let er = (if frac >= 0.75: exp else: exp - 1)
   let code = er + 127
-  if code > 254: E8M0(0xff'u8)
-  elif code < 0: E8M0(0x00'u8)
-  else: E8M0(uint8(code))
+  if code > 254:
+    E8M0(0xff'u8)
+  elif code < 0:
+    E8M0(0x00'u8)
+  else:
+    E8M0(uint8(code))
 
-func toE8M0*(x: float64): E8M0 {.inline.} = toE8M0(x.float32)
-func isNaN*(x: E8M0): bool {.inline.} = uint8(x) == 0xff'u8
-func decode*(x: E8M0): float32 {.inline.} = x.toFloat32
-func encode*(f: float32; _: typedesc[E8M0]): E8M0 {.inline.} = toE8M0(f)
-func storageBits*(_: typedesc[E8M0]): int {.inline.} = 8
-func dtypeCode*(_: typedesc[E8M0]): DType {.inline.} = dtE8M0
+func toE8M0*(x: float64): E8M0 {.inline.} =
+  toE8M0(x.float32)
+func isNaN*(x: E8M0): bool {.inline.} =
+  uint8(x) == 0xff'u8
+func decode*(x: E8M0): float32 {.inline.} =
+  x.toFloat32
+func encode*(f: float32, _: typedesc[E8M0]): E8M0 {.inline.} =
+  toE8M0(f)
+func storageBits*(_: typedesc[E8M0]): int {.inline.} =
+  8
+func dtypeCode*(_: typedesc[E8M0]): DType {.inline.} =
+  dtE8M0
 
 # ---- packing ----
 
-func packF4*(src: openArray[F4E2M1]; dst: var openArray[byte]) =
+func packF4*(src: openArray[F4E2M1], dst: var openArray[byte]) =
   ## Pack MXFP4 codes two per byte — LOW nibble = even index (ggml order).
   ## `dst.len` must be at least `(src.len + 1) div 2`.
   assert dst.len >= (src.len + 1) div 2
@@ -121,7 +148,7 @@ func packF4*(src: openArray[F4E2M1]; dst: var openArray[byte]) =
   if i < src.len:
     dst[j] = uint8(src[i]) and 0x0f'u8
 
-func unpackF4*(src: openArray[byte]; dst: var openArray[F4E2M1]) =
+func unpackF4*(src: openArray[byte], dst: var openArray[F4E2M1]) =
   ## Inverse of `packF4` — two values per source byte.
   var j = 0
   for b in src:
@@ -132,7 +159,7 @@ func unpackF4*(src: openArray[byte]; dst: var openArray[F4E2M1]) =
       dst[j] = F4E2M1(b shr 4)
       inc j
 
-func packF6*[T: F6E2M3 | F6E3M2](src: openArray[T]; dst: var openArray[byte]) =
+func packF6*[T: F6E2M3 | F6E3M2](src: openArray[T], dst: var openArray[byte]) =
   ## Tight-pack MXFP6 6-bit codes — FOUR values (4×6 = 24 bits) per THREE bytes,
   ## LSB-first. Within each little-endian 24-bit group: value0 → bits[5:0],
   ## value1 → bits[11:6], value2 → bits[17:12], value3 → bits[23:18]. The three
@@ -142,27 +169,27 @@ func packF6*[T: F6E2M3 | F6E3M2](src: openArray[T]; dst: var openArray[byte]) =
   ## F6E3M2 (both are 6-bit codes in the low 6 bits). `dst.len` must be at least
   ## `(src.len * 6 + 7) div 8`.
   assert dst.len >= (src.len * 6 + 7) div 8
-  var i = 0        # value index
-  var j = 0        # byte index
+  var i = 0 # value index
+  var j = 0 # byte index
   while i < src.len:
-    let n = min(4, src.len - i)                 # values in this group (1..4)
+    let n = min(4, src.len - i) # values in this group (1..4)
     var g = 0'u32
     for k in 0 ..< n:
       g = g or ((uint32(uint8(src[i + k])) and 0x3f'u32) shl (6 * k))
-    let nbytes = (n * 6 + 7) div 8              # 1,2,3 → 1,2,3 bytes; 4 → 3 bytes
+    let nbytes = (n * 6 + 7) div 8 # 1,2,3 → 1,2,3 bytes; 4 → 3 bytes
     for b in 0 ..< nbytes:
       dst[j + b] = uint8((g shr (8 * b)) and 0xff'u32)
     i += n
     j += nbytes
 
-func unpackF6*[T: F6E2M3 | F6E3M2](src: openArray[byte]; dst: var openArray[T]) =
+func unpackF6*[T: F6E2M3 | F6E3M2](src: openArray[byte], dst: var openArray[T]) =
   ## Inverse of `packF6` — reconstruct `dst.len` 6-bit codes from the three-byte
   ## groups. Reads only the bytes each (possibly ragged) group needs; never reads
   ## past `src`.
-  var i = 0        # byte index
-  var j = 0        # value index
+  var i = 0 # byte index
+  var j = 0 # value index
   while j < dst.len:
-    let n = min(4, dst.len - j)                 # values in this group (1..4)
+    let n = min(4, dst.len - j) # values in this group (1..4)
     let nbytes = (n * 6 + 7) div 8
     var g = 0'u32
     for b in 0 ..< nbytes:

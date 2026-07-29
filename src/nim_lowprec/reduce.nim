@@ -36,7 +36,8 @@ func dot*[T: LowPrec](a, b: openArray[T]): float32 =
   mixin decode
   assert a.len == b.len
   result = 0.0'f32
-  for i in 0 ..< a.len: result += decode(a[i]) * decode(b[i])
+  for i in 0 ..< a.len:
+    result += decode(a[i]) * decode(b[i])
 
 func nrm2*[T: LowPrec](x: openArray[T]): float32 =
   ## Euclidean norm √(Σ xᵢ²).
@@ -49,15 +50,18 @@ func absmax*[T: LowPrec](x: openArray[T]): float32 =
   result = 0.0'f32
   for v in x:
     let a = abs(decode(v))
-    if a > result: result = a
+    if a > result:
+      result = a
 
-func scal*[T: LowPrec](a: float32; x: var openArray[T]) =
+func scal*[T: LowPrec](a: float32, x: var openArray[T]) =
   ## x ← a·x  (compute in fp32, store narrow).
   mixin decode, encode
-  for i in 0 ..< x.len: x[i] = encode(a * decode(x[i]), T)
+  for i in 0 ..< x.len:
+    x[i] = encode(a * decode(x[i]), T)
 
-func axpy*[T: LowPrec](a: float32; x: openArray[T]; y: var openArray[T]) =
+func axpy*[T: LowPrec](a: float32, x: openArray[T], y: var openArray[T]) =
   ## y ← a·x + y  (compute in fp32, store narrow).
   mixin decode, encode
   assert x.len == y.len
-  for i in 0 ..< x.len: y[i] = encode(a * decode(x[i]) + decode(y[i]), T)
+  for i in 0 ..< x.len:
+    y[i] = encode(a * decode(x[i]) + decode(y[i]), T)

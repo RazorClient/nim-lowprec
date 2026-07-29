@@ -7,17 +7,15 @@
 
 import ./common
 
-type
-  BF16* = distinct uint16
-    ## A bfloat16 value: the high 16 bits of a `float32`.
+type BF16* = distinct uint16 ## A bfloat16 value: the high 16 bits of a `float32`.
 
 const
-  bf16Zero*   = BF16(0x0000'u16)
-  bf16One*    = BF16(0x3f80'u16)
-  bf16Inf*    = BF16(0x7f80'u16)
+  bf16Zero* = BF16(0x0000'u16)
+  bf16One* = BF16(0x3f80'u16)
+  bf16Inf* = BF16(0x7f80'u16)
   bf16NegInf* = BF16(0xff80'u16)
-  bf16NaN*    = BF16(0x7fc0'u16)   # canonical quiet NaN (positive)
-  bf16NegNaN* = BF16(0xffc0'u16)   # canonical quiet NaN (negative)
+  bf16NaN* = BF16(0x7fc0'u16) # canonical quiet NaN (positive)
+  bf16NegNaN* = BF16(0xffc0'u16) # canonical quiet NaN (negative)
 
 func bits*(x: BF16): uint16 {.inline.} =
   uint16(x)
@@ -43,7 +41,7 @@ func toBF16Trunc*(x: float32): BF16 {.inline.} =
     return (if (u and 0x8000_0000'u32) != 0'u32: bf16NegNaN else: bf16NaN)
   BF16(uint16(u shr 16))
 
-func toBF16Stochastic*(x: float32; rng: var uint32): BF16 =
+func toBF16Stochastic*(x: float32, rng: var uint32): BF16 =
   ## Stochastically round fp32 → bf16. The result is ALWAYS one of the two bf16
   ## values bracketing `x` (or `x` exactly when it is representable), and the one
   ## chosen with probability proportional to where `x` falls between them, so
@@ -56,19 +54,22 @@ func toBF16Stochastic*(x: float32; rng: var uint32): BF16 =
   ## stuck at 0). NaN/Inf fall back to the deterministic `toBF16` (stay NaN/Inf).
   let u = cast[uint32](x)
   if (u and 0x7fff_ffff'u32) >= 0x7f80_0000'u32:
-    return toBF16(x)                       # NaN / Inf → deterministic special
+    return toBF16(x) # NaN / Inf → deterministic special
   # advance xorshift32; the high 16 bits are the higher-quality dither
   var r = rng
   r = r xor (r shl 13)
   r = r xor (r shr 17)
   r = r xor (r shl 5)
   rng = r
-  let dither = r shr 16                     # uniform in [0, 65535]
+  let dither = r shr 16 # uniform in [0, 65535]
   BF16(uint16((u + dither) shr 16))
 
-func isNaN*(x: BF16): bool {.inline.} = (uint16(x) and 0x7fff'u16) > 0x7f80'u16
-func isInf*(x: BF16): bool {.inline.} = (uint16(x) and 0x7fff'u16) == 0x7f80'u16
-func signbit*(x: BF16): bool {.inline.} = (uint16(x) and 0x8000'u16) != 0'u16
+func isNaN*(x: BF16): bool {.inline.} =
+  (uint16(x) and 0x7fff'u16) > 0x7f80'u16
+func isInf*(x: BF16): bool {.inline.} =
+  (uint16(x) and 0x7fff'u16) == 0x7f80'u16
+func signbit*(x: BF16): bool {.inline.} =
+  (uint16(x) and 0x8000'u16) != 0'u16
 
 # Comparisons, `$`, arithmetic and the LowPrec interface, all routed through
 # toFloat32 / toBF16 — see common.defFloatOps.

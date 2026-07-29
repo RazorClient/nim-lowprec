@@ -27,15 +27,18 @@ const
 
 var x = newSeq[float32](K)
 var y = newSeq[float32](M)
-for i in 0 ..< K: x[i] = float32(i mod 7) * 0.1'f32 - 0.3'f32
+for i in 0 ..< K:
+  x[i] = float32(i mod 7) * 0.1'f32 - 0.3'f32
 
 header "multi-core fused GEMV  (" & $countProcessors() & " logical cores)"
 
 block: # ---- int8 ----
   var wq = newSeq[I8](M * K)
   var scales = newSeq[float32](M * gpr)
-  for i in 0 ..< wq.len: wq[i] = toI8(float32((i mod 15) - 7))
-  for i in 0 ..< scales.len: scales[i] = 0.02'f32
+  for i in 0 ..< wq.len:
+    wq[i] = toI8(float32((i mod 15) - 7))
+  for i in 0 ..< scales.len:
+    scales[i] = 0.02'f32
 
   var g = flopGroup("int8 GEMV, row-sharded", shape, flops, tol = 0.0)
   g.measure "serial", y[mid]:
@@ -49,7 +52,8 @@ block: # ---- ggml Q4_0, the shape real quantized weights ship in ----
   var w = newSeq[BlockQ4_0](M * bpr)
   for b in 0 ..< w.len:
     w[b].d = toF16(0.0125'f32)
-    for i in 0 ..< QK div 2: w[b].qs[i] = uint8((b * 7 + i * 11) and 0xff)
+    for i in 0 ..< QK div 2:
+      w[b].qs[i] = uint8((b * 7 + i * 11) and 0xff)
 
   var g = flopGroup("ggml Q4_0 GEMV, row-sharded", shape, flops, tol = 0.0)
   g.measure "serial", y[mid]:
