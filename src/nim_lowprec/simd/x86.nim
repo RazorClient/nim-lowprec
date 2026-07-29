@@ -74,11 +74,6 @@ when defined(amd64) or defined(i386):
   proc mm256_unpackhi_epi8*(a, b: m256i): m256i {.importc: "_mm256_unpackhi_epi8".}
   proc mm256_set_m128i*(hi, lo: m128i): m256i {.importc: "_mm256_set_m128i".}
 
-  proc hsum256i*(v: m256i): int32 {.inline.} =
-    ## Horizontal sum of 8×int32 — once per group, so a plain spill is fine.
-    var buf {.noinit.}: array[8, int32]
-    mm256_storeu_si256(cast[ptr m256i](addr buf[0]), v)
-    (buf[0] + buf[1]) + (buf[2] + buf[3]) + (buf[4] + buf[5]) + (buf[6] + buf[7])
   proc mm_add_epi32*(a, b: m128i): m128i {.importc: "_mm_add_epi32".}
   proc mm_sub_epi8*(a, b: m128i): m128i {.importc: "_mm_sub_epi8".}
   proc mm_add_ps*(a, b: m128): m128 {.importc: "_mm_add_ps".}
@@ -109,7 +104,18 @@ when defined(amd64) or defined(i386):
 
   {.pop.}
 
-  # Horizontal sum of an 8-lane accumulator → scalar (used by the fused GEMVs).
+  # Horizontal sums of an 8-lane accumulator → scalar (used by the fused GEMVs).
+  # These have Nim BODIES, so they must live BELOW the `{.pop.}`: inside the
+  # `{.push header.}` region the inherited header pragma makes Nim declare them
+  # as external C functions and never emit the body — an undefined reference
+  # that only surfaces in programs that actually link them (the AVX2 CI leg
+  # caught exactly that on `hsum256i`).
+  proc hsum256i*(v: m256i): int32 {.inline.} =
+    ## Horizontal sum of 8×int32 — once per group, so a plain spill is fine.
+    var buf {.noinit.}: array[8, int32]
+    mm256_storeu_si256(cast[ptr m256i](addr buf[0]), v)
+    (buf[0] + buf[1]) + (buf[2] + buf[3]) + (buf[4] + buf[5]) + (buf[6] + buf[7])
+
   proc hsum256*(v: m256): float32 {.inline.} =
     let lo = mm256_castps256_ps128(v)
     let hi = mm256_extractf128_ps(v, 1)
