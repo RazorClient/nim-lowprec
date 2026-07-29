@@ -8,9 +8,15 @@ cannot validate the MX / NVFP4 *schemes*. So the motto must become:
 > **`ml_dtypes` for elements · `gguf-py` + `microxcaling` for block schemes ·
 > TransformerEngine `NVFP4QuantizerRef` for NVFP4.**
 
-Don't let green element tests create false confidence that MXFP4/MXFP6/MXFP8 are
+~~Don't let green element tests create false confidence that MXFP4/MXFP6/MXFP8 are
 "done" — only their *elements* are proven today; the *schemes* are not yet
-diff-tested end-to-end.
+diff-tested end-to-end.~~ **Done (July 2026):** the schemes are now diff-tested in
+`tests/test_scheme_conformance.nim` — ggml Q8_0/Q4_0 quantize+dequant and Q4_K/Q6_K
+dequant bit-exact vs **gguf-py**; MX (fp4/fp6, block 32) end-to-end vs an
+independent OCP v1.0 + `ml_dtypes` implementation; **NVFP4** bit-exact vs a
+transcription of TransformerEngine's `NVFP4QuantizerRef`; **MXINT8** named
+(calibrateMX + I8, elemEmax 6). Golden generators live in `gen_reference.py`
+(`pip install gguf` added to CI).
 
 > Synthesized from a mid-2026 survey of the OCP MX v1.0 spec, NVIDIA NVFP4,
 > DeepSeek-V3 FP8, llama.cpp/ggml, gpt-oss (MXFP4), and the EXL3/QTIP line.
@@ -92,19 +98,29 @@ checkpoints on HF Hub for integration.
 ## Roadmap (prioritized)
 
 **P0 — highest value, lowest effort, squarely in-scope**
-1. **Wire `gguf.quants` into CI as a second oracle** (`gen_ggml_reference.py`): Q4_0/Q8_0
-   become *bit-exact vs ggml*, not round-trip. ~half a day.
-2. **Add k-quant Q4_K / Q6_K** (then Q5_K, Q2_K/Q3_K, Q8_K) to `ggml.nim`, diff-tested
-   vs `gguf.quants`. This is what makes "ingest a real GGUF model" true.
-3. **MX end-to-end conformance** vs `microxcaling._quantize_mx` (MXFP4/6/8 block
-   round-trips in `test_mx_conformance.nim`). Proves `calibrateMX`, not just elements.
+1. ✅ **DONE** — `gguf.quants` wired in as a second oracle (`emit_ggml_schemes` in
+   `gen_reference.py`): Q4_0/Q8_0 quantize bytes AND dequant are bit-exact vs gguf-py.
+2. ✅ **DONE (dequant)** — Q4_K / Q6_K super-block DEQUANTIZE in `ggml.nim`, bit-exact
+   vs gguf-py over random valid blocks. The QUANTIZE direction is deliberately absent:
+   gguf-py provides no oracle for it (raises NotImplementedError) and ingestion never
+   needs it. Remaining k-quants (Q5_K, Q2_K/Q3_K, Q8_K) follow the same recipe when a
+   consumer needs them.
+3. ✅ **DONE** — MX end-to-end conformance (`test_scheme_conformance.nim`): fp4/fp6 at
+   block 32 including E8M0-clamp extremes, zero blocks and denormal magnitudes.
+   microxcaling is torch-based and not on PyPI, so the oracle is an independent numpy
+   implementation of OCP MX v1.0 with `ml_dtypes` element rounding (Tier-B port rule).
 
 **P1 — the strategic new format**
-4. **NVFP4** as a new `QScheme` (`qNVFP4Block`): block-16, per-block F8E4M3 scale,
-   per-tensor FP32 scale, reusing `F4E2M1`. Golden from TransformerEngine
-   `NVFP4QuantizerRef` (CPU-runnable). Highest strategic ROI — the frontier format we
-   already have every primitive for.
-5. **Name + conformance-test MXINT8** (int8 element + E8M0 block-32).
+4. ✅ **DONE** — **NVFP4** in `src/nim_lowprec/nvfp4.nim` (`quantizeNVFP4` /
+   `dequantizeNVFP4`): block-16, per-block F8E4M3 scale, per-tensor fp32 scale. Codes,
+   scales and the global scale are bit-exact vs a numpy transcription of TE's
+   `NVFP4QuantizerRef` (1D, non-pow2 path), including the by-design block collapse
+   when a block amax sits >~2^17 below the tensor amax (e4m3 scale underflow).
+   Implemented as dedicated procs, not a `QScheme` — two-level scaling doesn't fit
+   `QParams` without changing its dequant op order.
+5. ✅ **DONE** — **MXINT8** named and tested: `calibrateMX(x, 32, elemEmax = 6)` + `I8`
+   places every block amax in the top octave (|q| ∈ [64, 127]). One documented
+   deviation from spec-pure: `toI8` rounds ties away (like ggml), not to even.
 
 **P2 — ecosystem breadth (when a consumer needs it)**
 6. **NF4** codec vs `bitsandbytes.quantize_4bit`.

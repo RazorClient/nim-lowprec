@@ -25,7 +25,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install differential-test oracles
-        run: python -m pip install --upgrade numpy ml_dtypes
+        run: python -m pip install --upgrade numpy ml_dtypes gguf
 
       # Regenerates the golden vectors on THIS runner's arch, so the differential
       # suites (vs ml_dtypes / numpy) actually run instead of skipping — enforcing

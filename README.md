@@ -22,14 +22,18 @@ can depend on.
 | fp8 (OCP) | `F8E4M3`, `F8E5M2` | e4m3fn / e5m2 |
 | fp8 (AMD) | `F8E4M3FNUZ`, `F8E5M2FNUZ` | fnuz: bias +1, no Inf/−0, `0x80` NaN |
 | **MXFP4** | `F4E2M1` | OCP microscaling 4-bit float (e2m1) |
+| **NVFP4** | `quantizeNVFP4` | block-16 + FP8-E4M3 scale + fp32 tensor scale, bit-exact vs TransformerEngine's reference |
 | **MXFP6** | `F6E2M3`, `F6E3M2` | OCP microscaling 6-bit floats |
 | **MX scale** | `E8M0` | shared power-of-two block scale (`2^(b−127)`) |
-| integers | `I8`, `I4`, `I1` | + nibble / bit packing (ggml low-nibble-first) |
+| integers | `I8`, `I4`, `I1` | + nibble / bit packing (ggml low-nibble-first); **MXINT8** = `calibrateMX` + `I8` |
+| ggml blocks | `BlockQ8_0/Q4_0/Q4_K/Q6_K` | quantize (Q*_0) and dequantize, bit-exact vs **gguf-py** |
 
 Every float↔float32 conversion is verified **bit-exact** against `ml_dtypes` /
 `numpy` — exhaustive where the code space allows (all 2¹⁶ for bf16/fp16, all 2⁸
 for each fp8, every code for the MX formats), differential over millions of
-samples otherwise.
+samples otherwise. The block **schemes** are diff-tested end-to-end too: ggml
+formats against **gguf-py**, MX block scaling against an independent OCP v1.0
+implementation, NVFP4 against TransformerEngine's reference (see CONFORMANCE.md).
 
 On top of the storage types:
 
@@ -53,7 +57,7 @@ On top of the storage types:
 Not yet on the Nimble registry — install from git (pin the release tag):
 
 ```sh
-nimble install https://github.com/RazorClient/nim-lowprec@#v0.1.0
+nimble install https://github.com/RazorClient/nim-lowprec@#v1.0.0
 ```
 
 ## Quickstart

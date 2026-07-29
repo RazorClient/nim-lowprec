@@ -1,6 +1,6 @@
 # Package
 
-version       = "0.1.0"
+version       = "1.0.0"
 author        = "Tamaghna Choudhuri"
 description   = "Zero-dependency low-precision numeric substrate (bf16/fp16/fp8/MXFP4/MXFP6/E8M0/int8/int4/int1) + quantization + NEON/AVX2 kernels for ML inference in Nim"
 license       = "MIT"
@@ -27,6 +27,7 @@ task test, "Run the correctness suite (this is what CI runs)":
   exec "nim c -r --hints:off tests/test_ggml.nim"
   exec "nim c -r --hints:off tests/test_parallel.nim"
   exec "nim c -r --hints:off tests/test_sdot.nim"
+  exec "nim c -r --hints:off tests/test_scheme_conformance.nim"
 
 task simd, "Run NEON SIMD tests (arm64; CI runs this on the macOS runners; x86 SIMD has its own workflow)":
   exec "nim c -r --hints:off tests/test_bf16_simd.nim"
@@ -40,7 +41,7 @@ task simd, "Run NEON SIMD tests (arm64; CI runs this on the macOS runners; x86 S
 task example, "Run the quickstart example":
   exec "nim c -r --hints:off examples/quickstart.nim"
 
-task refs, "Generate reference vectors (needs python3 + numpy + ml_dtypes)":
+task refs, "Generate reference vectors (needs python3 + numpy + ml_dtypes + gguf)":
   exec "python3 tests/gen_reference.py"
 
 # Microbenchmarks. Every bench times a scalar reference against the kernel the
