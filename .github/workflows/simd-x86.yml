@@ -1,0 +1,62 @@
+name: SIMD (x86)
+
+on: [push, pull_request]
+
+# x86 SIMD is verified HERE (the arm64 dev box can't run it). ubuntu-latest
+# runners have AVX2 natively, so we build with the ISA flag and run the binary
+# DIRECTLY — no emulator needed at this level, and native is more faithful than
+# emulation (it tests real silicon, not an emulator's FP rounding).
+#
+# Emulation (qemu-user -cpu <model>, or Intel SDE with -chip-check) comes BACK
+# the moment we target AVX-512 / VNNI / BF16 — the runners don't have those, so
+# those ISAs can only be exercised under emulation. Not needed until then.
+#
+# NEON is NOT here — it's tested locally on arm64 (`nimble simd`), the only place
+# its hardware exists. Same principle, opposite arch.
+#
+# NOTE: C flags are passed one-per-`--passC:` and OMITTED entirely when empty.
+# An empty `--passC:` swallows the following `-o:` arg (Nim writes the binary to
+# its default source-dir location instead) — that bit us once; don't reintroduce.
+jobs:
+  simd-x86:
+    name: x86 ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: scalar, passc: "" }                            # harness baseline (no intrinsics)
+          - { target: avx2,   passc: "--passC:-mavx2 --passC:-mfma --passC:-mf16c" } # AVX2 + FMA + F16C
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Nim
+        uses: jiro4989/setup-nim-action@v2
+        with:
+          nim-version: 'stable'
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Fail loudly with a clear reason if a runner ever lacks AVX2, instead of a
+      # mysterious SIGILL mid-test.
+      - name: Assert runner has AVX2
+        if: matrix.target == 'avx2'
+        run: grep -q avx2 /proc/cpuinfo
+
+      # Build AND run in one shell. `set -euxo pipefail` traces every command;
+      # `test -x` fails at the build line if the binary didn't land where -o says
+      # (defends against arg-parsing surprises). The tests diff the SIMD path
+      # against the scalar reference element-for-element, so a wrong lane fails here.
+      - name: Build & run (lpSimd=${{ matrix.target }})
+        run: |
+          set -euxo pipefail
+          mkdir -p build
+          # Keep this list in sync with the `simd` task in nim_lowprec.nimble —
+          # every SIMD test must run on BOTH ISAs, or an AVX2 lane bug ships.
+          for t in test_bf16_simd test_quant_simd test_blas1_simd test_f8_simd test_parallel test_sdot; do
+            nim c --hints:off -d:lpSimd=${{ matrix.target }} ${{ matrix.passc }} \
+              -o:"$PWD/build/$t" "tests/$t.nim"
+            test -x "build/$t"
+            file "build/$t"
+            echo "== running $t (${{ matrix.target }}) =="
+            "$PWD/build/$t"
+          done
