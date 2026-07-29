@@ -143,6 +143,157 @@ def emit_e8m0():
         fh.write(outs.astype("<u1").tobytes())
 
 
+# ======================= BLOCK-SCHEME golden vectors =======================
+# Everything above validates ELEMENT codecs. The emitters below validate the
+# block SCHEMES end-to-end (CONFORMANCE.md P0/P1): shared-scale selection,
+# layout, and the exact fp op order of (de)quantization.
+
+def emit_ggml_schemes():
+    """External oracle: gguf-py (`pip install gguf`) — llama.cpp's own numpy
+    implementation, documented bit-exact vs ggml-quants.c. Replaces the old
+    round-trip self-test with a real second implementation. Skipped with a
+    warning when gguf is not installed; the Nim tests skip when files are absent."""
+    try:
+        import gguf
+        from gguf import GGMLQuantizationType as T, quants
+    except ImportError:
+        print("  !! gguf not installed -> skipping ggml scheme goldens (pip install gguf)")
+        return
+    rng = np.random.default_rng(1234)
+    n = 256 * 64                                # 64 super-blocks = 512 Q*_0 blocks
+    x = (rng.standard_normal(n) * 4.0).astype(np.float32)
+    x[100:132] = 0.0                            # an all-zero Q*_0 block
+    x[4096:4104] = np.float32(1e-30)            # a denormal-scale block
+    x.view("<u4").tofile(os.path.join(HERE, "ref_scheme_input.bin"))
+    # Q8_0 / Q4_0: gguf-py implements the QUANTIZE direction (bit-exact vs
+    # ggml-quants.c) — golden covers quantize bytes AND their dequant.
+    for name, t in [("q8_0", T.Q8_0), ("q4_0", T.Q4_0)]:
+        b = quants.quantize(x, t)
+        d = quants.dequantize(b, t).astype(np.float32)
+        b.tofile(os.path.join(HERE, f"ref_ggml_{name}_bytes.bin"))
+        d.view("<u4").tofile(os.path.join(HERE, f"ref_ggml_{name}_dq.bin"))
+    # Q4_K / Q6_K: gguf-py only implements DEQUANTIZE for the k-quants — which
+    # is the ingestion direction. Golden = synthetic (valid) random blocks +
+    # gguf-py's dequantization of them. d/dmin are kept finite so the fp32
+    # comparison can be bit-exact (NaN payloads would differ meaninglessly).
+    rng2 = np.random.default_rng(5678)
+    def finite_f16(count):
+        v = (rng2.standard_normal(count) * 0.1).astype(np.float16)
+        return v.view(np.uint8).reshape(count, 2)
+    NB = 128
+    q4k = np.zeros((NB, 144), dtype=np.uint8)
+    q4k[:, 0:2]   = finite_f16(NB)                                   # d
+    q4k[:, 2:4]   = finite_f16(NB)                                   # dmin
+    q4k[:, 4:144] = rng2.integers(0, 256, size=(NB, 140), dtype=np.uint16).astype(np.uint8)
+    q6k = np.zeros((NB, 210), dtype=np.uint8)
+    q6k[:, 0:208]   = rng2.integers(0, 256, size=(NB, 208), dtype=np.uint16).astype(np.uint8)
+    q6k[:, 208:210] = finite_f16(NB)                                 # d (at the END in q6_K)
+    for name, t, blocks in [("q4_k", T.Q4_K, q4k), ("q6_k", T.Q6_K, q6k)]:
+        raw = blocks.reshape(-1)
+        d = quants.dequantize(raw, t).astype(np.float32)
+        raw.tofile(os.path.join(HERE, f"ref_ggml_{name}_bytes.bin"))
+        d.view("<u4").tofile(os.path.join(HERE, f"ref_ggml_{name}_dq.bin"))
+    print("  ggml scheme goldens written (gguf-py oracle)")
+
+
+def emit_mx_schemes():
+    """OCP MX v1.0 block scheme, implemented independently here in numpy with
+    ml_dtypes element rounding: shared scale = 2^(clamp(floor(log2(blockAmax))
+    - elemEmax, -127, 127)) (amax==0 -> scale 1), elements = (x/scale) rounded
+    by ml_dtypes, fake-quant out = element * scale. This is what validates
+    `calibrateMX` + generic quantize/dequantize END TO END — the element goldens
+    above cannot see the scale selection. (microxcaling implements the same
+    spec; it is torch-based and not on PyPI, hence this transcription — see
+    CONFORMANCE.md.)"""
+    formats = [("f4e2m1", ml_dtypes.float4_e2m1fn, 2),
+               ("f6e2m3", ml_dtypes.float6_e2m3fn, 2),
+               ("f6e3m2", ml_dtypes.float6_e3m2fn, 4)]
+    BS = 32
+    rng = np.random.default_rng(777)
+    nblocks = 512
+    n = BS * nblocks
+    x = (rng.standard_normal(n) * 2.0).astype(np.float32)
+    # magnitude sweep across blocks, including E8M0-clamp extremes and denormals
+    mags = np.float32(2.0) ** rng.integers(-140, 120, size=nblocks).astype(np.float32)
+    x = (x.reshape(nblocks, BS) * mags[:, None]).astype(np.float32)
+    x[3] = 0.0                                  # all-zero block
+    x[4, :16] = 0.0                             # half-zero block
+    x = x.reshape(-1)
+    x.view("<u4").tofile(os.path.join(HERE, "ref_mx_input.bin"))
+    xb = x.reshape(nblocks, BS)
+    amax = np.abs(xb).max(axis=1)
+    with np.errstate(divide="ignore"):
+        e = np.floor(np.log2(amax.astype(np.float64)))   # exact for powers of two
+    for name, dt, emax in formats:
+        k = np.clip(e - emax, -127, 127)
+        scale = np.where(amax == 0, np.float32(1.0),
+                         np.exp2(k).astype(np.float32))[:, None].astype(np.float32)
+        q = (xb / scale).astype(dt)             # ml_dtypes: RNE, saturating
+        dq = (q.astype(np.float32) * scale).astype(np.float32)
+        dq.reshape(-1).view("<u4").tofile(os.path.join(HERE, f"ref_mx_{name}_dq.bin"))
+    print("  MX scheme goldens written (OCP v1.0 + ml_dtypes elements)")
+
+
+def emit_nvfp4():
+    """NVFP4 golden — numpy transcription of TransformerEngine's
+    NVFP4QuantizerRef._quantize_blockwise_reference (1D path, pow_2_scales=False,
+    no 4over6), transformer_engine/pytorch/custom_recipes/quantization_ref_nvfp4.py.
+    Block 16, per-block FP8-E4M3 decode scale, per-tensor fp32 scale. The e4m3
+    cast uses ml_dtypes (RNE, same as torch's cast after the clamp)."""
+    F32MAX = np.float32(np.finfo(np.float32).max)
+    rng = np.random.default_rng(4242)
+    nblocks = 1024
+    n = 16 * nblocks
+    x = (rng.standard_normal(n) * 3.0).astype(np.float32)
+    mags = np.float32(2.0) ** rng.integers(-20, 20, size=nblocks).astype(np.float32)
+    x = (x.reshape(nblocks, 16) * mags[:, None]).astype(np.float32)
+    x[7] = 0.0                                  # zero block inside a nonzero tensor
+    xf = x.reshape(-1)
+    xf.view("<u4").tofile(os.path.join(HERE, "ref_nvfp4_input.bin"))
+
+    gamax = np.float32(np.abs(xf).max())
+    ges = np.minimum(np.float32(2688.0) / gamax, F32MAX)      # 448 * 6
+    if ges == np.float32(0.0):
+        ges = np.float32(1.0)
+    gds = np.float32(1.0) / ges
+    mult = ges * np.float32(np.float32(1.0) / np.float32(6.0))  # reciprocal(6) then mul
+
+    vmax = np.abs(x).max(axis=1).astype(np.float32)
+    ds = np.minimum(vmax * mult, F32MAX)
+    ds = np.clip(ds, -np.float32(448.0), np.float32(448.0))
+    ds8 = ds.astype(ml_dtypes.float8_e4m3fn)                  # per-block decode scale
+    with np.errstate(divide="ignore"):
+        es = np.minimum(np.float32(1.0) / (ds8.astype(np.float32) * gds), F32MAX)
+    scaled = (x * es[:, None].astype(np.float32)).astype(np.float32)
+    clipped = np.clip(scaled, -6.0, 6.0).astype(np.float32)
+
+    # TE's cast_to_fp4x2 boundary table (== RNE on the e2m1 grid, -0 -> code 0)
+    c = clipped
+    codes = np.zeros(c.shape, dtype=np.uint8)
+    codes[(c >= 0.0) & (c <= 0.25)] = 0
+    codes[(c > 0.25) & (c < 0.75)] = 1
+    codes[(c >= 0.75) & (c <= 1.25)] = 2
+    codes[(c > 1.25) & (c < 1.75)] = 3
+    codes[(c >= 1.75) & (c <= 2.5)] = 4
+    codes[(c > 2.5) & (c < 3.5)] = 5
+    codes[(c >= 3.5) & (c <= 5.0)] = 6
+    codes[c > 5.0] = 7
+    codes[(c >= -0.25) & (c < -0.0)] = 8
+    codes[(c < -0.25) & (c > -0.75)] = 9
+    codes[(c <= -0.75) & (c >= -1.25)] = 10
+    codes[(c < -1.25) & (c > -1.75)] = 11
+    codes[(c <= -1.75) & (c >= -2.5)] = 12
+    codes[(c < -2.5) & (c > -3.5)] = 13
+    codes[(c <= -3.5) & (c >= -5.0)] = 14
+    codes[c < -5.0] = 15
+
+    with open(os.path.join(HERE, "ref_nvfp4_out.bin"), "wb") as fh:
+        fh.write(np.float32(gds).tobytes())                   # 4 B global decode scale
+        fh.write(ds8.view(np.uint8).tobytes())                # nblocks e4m3 bytes
+        fh.write(codes.reshape(-1).astype("<u1").tobytes())   # n fp4 codes (unpacked)
+    print("  NVFP4 goldens written (TE NVFP4QuantizerRef transcription)")
+
+
 if __name__ == "__main__":
     emit_bf16()
     emit_f16()
@@ -154,4 +305,7 @@ if __name__ == "__main__":
     emit_mx_float("f6e2m3", ml_dtypes.float6_e2m3fn, 64, 42)
     emit_mx_float("f6e3m2", ml_dtypes.float6_e3m2fn, 64, 43)
     emit_e8m0()
-    print(f"wrote bf16 + f16 + fp8x4 + mxfp4/6 + e8m0 reference vectors to {HERE}")
+    emit_ggml_schemes()
+    emit_mx_schemes()
+    emit_nvfp4()
+    print(f"wrote element + block-scheme reference vectors to {HERE}")

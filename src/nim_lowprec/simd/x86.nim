@@ -51,6 +51,34 @@ when defined(amd64) or defined(i386):
   # ---- arithmetic ----
   proc mm256_mul_ps*(a, b: m256): m256 {.importc: "_mm256_mul_ps".}
   proc mm256_fmadd_ps*(a, b, c: m256): m256 {.importc: "_mm256_fmadd_ps".}     # a*b + c  (FMA)
+  proc mm256_add_ps*(a, b: m256): m256 {.importc: "_mm256_add_ps".}            # lanewise add (folding accumulators)
+
+  # ---- int8 dot-product building blocks (the AVX2 stand-in for ARM SDOT) ----
+  # x86 has no signed×signed int8 dot; the standard construction (ggml uses the
+  # same) is abs/sign + maddubs (u8×s8 -> pairwise i16; |a|≤128, |b|≤127, so the
+  # i16 saturation bound 32767 cannot be hit: 128·127·2 = 32512) + madd(1) to i32.
+  proc mm256_loadu_si256*(p: ptr m256i): m256i {.importc: "_mm256_loadu_si256".}
+  proc mm256_storeu_si256*(p: ptr m256i; a: m256i) {.importc: "_mm256_storeu_si256".}
+  proc mm256_setzero_si256*(): m256i {.importc: "_mm256_setzero_si256".}
+  proc mm256_sign_epi8*(a, b: m256i): m256i {.importc: "_mm256_sign_epi8".}
+  proc mm256_maddubs_epi16*(a, b: m256i): m256i {.importc: "_mm256_maddubs_epi16".}
+  proc mm256_madd_epi16*(a, b: m256i): m256i {.importc: "_mm256_madd_epi16".}
+  proc mm256_set1_epi16*(a: cint): m256i {.importc: "_mm256_set1_epi16".}
+  proc mm256_set1_epi8*(a: cint): m256i {.importc: "_mm256_set1_epi8".}
+  proc mm256_add_epi32*(a, b: m256i): m256i {.importc: "_mm256_add_epi32".}
+  proc mm256_and_si256*(a, b: m256i): m256i {.importc: "_mm256_and_si256".}
+  proc mm256_xor_si256*(a, b: m256i): m256i {.importc: "_mm256_xor_si256".}
+  proc mm256_sub_epi8*(a, b: m256i): m256i {.importc: "_mm256_sub_epi8".}
+  proc mm256_srli_epi16*(a: m256i; imm: cint): m256i {.importc: "_mm256_srli_epi16".}
+  proc mm256_unpacklo_epi8*(a, b: m256i): m256i {.importc: "_mm256_unpacklo_epi8".}
+  proc mm256_unpackhi_epi8*(a, b: m256i): m256i {.importc: "_mm256_unpackhi_epi8".}
+  proc mm256_set_m128i*(hi, lo: m128i): m256i {.importc: "_mm256_set_m128i".}
+
+  proc hsum256i*(v: m256i): int32 {.inline.} =
+    ## Horizontal sum of 8×int32 — once per group, so a plain spill is fine.
+    var buf {.noinit.}: array[8, int32]
+    mm256_storeu_si256(cast[ptr m256i](addr buf[0]), v)
+    (buf[0] + buf[1]) + (buf[2] + buf[3]) + (buf[4] + buf[5]) + (buf[6] + buf[7])
   proc mm_add_epi32*(a, b: m128i): m128i {.importc: "_mm_add_epi32".}
   proc mm_sub_epi8*(a, b: m128i): m128i {.importc: "_mm_sub_epi8".}
   proc mm_add_ps*(a, b: m128): m128 {.importc: "_mm_add_ps".}

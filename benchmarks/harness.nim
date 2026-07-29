@@ -98,5 +98,20 @@ proc report*(g: BenchGroup) =
     echo &"   CHECKSUM MISMATCH: baseline {want:.9g} vs " & bad.join(", ")
     quit 1
 
+proc warmCore() =
+  ## Spin ~50 ms of dependent fp work before the first measurement.
+  ##
+  ## On Apple Silicon a P-core starts at a low clock and ramps: the same 17 MB
+  ## streaming loop measures 10.5 GB/s as the first thing a process does and
+  ## 17.1 GB/s once warm. Each group's own warm-up run usually covers this, but the
+  ## FIRST group in a binary would otherwise be timed against a cold clock and read
+  ## ~40% slow — which is exactly the row a reader compares everything else to.
+  var acc = 1.000001'f32
+  let t0 = getMonoTime()
+  while (getMonoTime() - t0).inMilliseconds < 50:
+    for _ in 1 .. 100_000: acc *= 1.0000001'f32
+  if acc == 0.0'f32: echo ""       # keep the loop from being optimized away
+
 proc header*(what: string) =
+  warmCore()
   echo &"{what}   backend = {simdBackend}   (-d:lpSimd={lpSimd})"

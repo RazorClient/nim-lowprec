@@ -8,7 +8,7 @@
 ## streams at 2 bytes/element. The gap between the two speedups is the story: this
 ## kernel is 4 FLOP per 4 bytes loaded, so it stops being ALU-limited very quickly.
 
-import nim_lowprec/[bfloat16, reduce, simd/blas1]
+import nim_lowprec/[bfloat16, float16, reduce, simd/blas1]
 import ./harness
 
 header "bf16 BLAS-1"
@@ -43,3 +43,19 @@ for n in [4_096, 16_000_000]:
     acc = 0.0'f32
     for _ in 1 .. reps: acc += dotBf16(a, b)
   g.report()
+
+  # fp16 sibling: hardware widen straight into the same FMA shape
+  var ah = newSeq[F16](n)
+  var bh = newSeq[F16](n)
+  for i in 0 ..< n:
+    ah[i] = toF16(toFloat32(a[i]))
+    bh[i] = toF16(toFloat32(b[i]))
+  var h = flopGroup("fp16 dot  (x" & $reps & ")", "N = " & $n,
+                    2.0 * n.float * reps.float, tol = 1e-3)
+  h.scalarRow acc:
+    acc = 0.0'f32
+    for _ in 1 .. reps: acc += dot(ah, bh)
+  h.kernelRow acc:
+    acc = 0.0'f32
+    for _ in 1 .. reps: acc += dotF16(ah, bh)
+  h.report()

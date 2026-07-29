@@ -1,8 +1,7 @@
 ## ggml block formats (Q8_0 / Q4_0) — the layout real quantized LLM weights ship
 ## in. Two questions, measured separately:
 ##
-## 1. block dequant → fp32: `dequantizeQ*` is scalar-only today, so this group is
-##    the honest baseline for how fast the load path currently is (one row only).
+## 1. block dequant → fp32: scalar reference vs `dequantizeQ*Batch` (bit-exact).
 ## 2. GEMV: three rows, so the two wins are separable —
 ##      scalar ref          fused scalar loop (decode in the inner loop)
 ##      dequant + f32 dot   UNFUSED: expand a row to fp32, then dot it
@@ -14,7 +13,7 @@
 ## reference loops take `openArray` params like the kernels do, so the C compiler
 ## has the same auto-vectorization opportunity on both sides.
 
-import nim_lowprec/[float16, ggml, simd/dequant]
+import nim_lowprec/[float16, ggml, simd/dequant, simd/target]
 import ./harness
 
 const
@@ -51,12 +50,18 @@ block: # ---- 1. block dequant → fp32 (scalar-only, no kernel yet) ----
   g.scalarRow dst[K div 2]:
     for r in 0 ..< M:
       dequantizeQ8_0(q8.toOpenArray(r * bpr, (r + 1) * bpr - 1), dst)
+  g.kernelRow dst[K div 2]:
+    for r in 0 ..< M:
+      dequantizeQ8_0Batch(q8.toOpenArray(r * bpr, (r + 1) * bpr - 1), dst)
   g.report()
 
   var h = elemGroup("Q4_0 dequant → fp32", M * K)
   h.scalarRow dst[K div 2]:
     for r in 0 ..< M:
       dequantizeQ4_0(q4.toOpenArray(r * bpr, (r + 1) * bpr - 1), dst)
+  h.kernelRow dst[K div 2]:
+    for r in 0 ..< M:
+      dequantizeQ4_0Batch(q4.toOpenArray(r * bpr, (r + 1) * bpr - 1), dst)
   h.report()
 
 block: # ---- 2. Q8_0 GEMV ----
@@ -121,3 +126,23 @@ block: # ---- 3. Q4_0 GEMV (value = d·(nibble−8), ggml lane order) ----
   g.kernelRow y[mid]:
     dequantGemvQ4_0(q4, bpr, x, y)
   g.report()
+
+block: # ---- 4. int8-activation (SDOT) forms over the same blocks ----
+  # Format-identical to llama.cpp's vec_dot_q8_0_q8_0 / q4_0_q8_0: activations
+  # quantized to Q8_0 blocks, scale inline per 32 weights. On this machine these
+  # are SLOWER than the group-scale SDOT kernels in bench_sdot (the per-32-weight
+  # finalize is 4x more frequent than per-128) — they exist so real GGUF weights
+  # can run without repacking. Exactness is pinned in tests/test_sdot.nim.
+  var xq = newSeq[BlockQ8_0](bpr)
+  var g = flopGroup("Q8_0 GEMV, q8 activations (SDOT, dotprod=" &
+                    (if lpUseDotProd: "on" else: "off") & ")", shape, flops, tol = 0.0)
+  g.measure "serial", y[mid]:
+    quantizeQ8_0(x, xq)
+    dequantGemvQ8_0Q8(q8, bpr, xq, y)
+  g.report()
+
+  var h = flopGroup("Q4_0 GEMV, q8 activations (SDOT)", shape, flops, tol = 0.0)
+  h.measure "serial", y[mid]:
+    quantizeQ8_0(x, xq)
+    dequantGemvQ4_0Q8(q4, bpr, xq, y)
+  h.report()

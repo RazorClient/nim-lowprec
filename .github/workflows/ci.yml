@@ -35,3 +35,15 @@ jobs:
 
       - name: Run conformance suite
         run: nimble test
+
+      # macos-latest runners are Apple Silicon, so the NEON suite runs in CI too
+      # (SDOT, streaming and pool legs included via the nimble task). The README's
+      # old "NEON is verified locally" era ended when GitHub switched these
+      # runners to M-series. Fail loudly if the runner ever reverts to x86.
+      - name: Assert runner is arm64
+        if: matrix.os == 'macos-latest'
+        run: test "$(uname -m)" = "arm64"
+
+      - name: Run NEON SIMD suite
+        if: matrix.os == 'macos-latest'
+        run: nimble simd

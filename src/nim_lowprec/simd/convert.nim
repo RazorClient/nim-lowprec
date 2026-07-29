@@ -16,6 +16,18 @@ export target          # re-export simdBackend (+ the lpUse* selection flags)
 when lpUseNeon: import ./neon
 when lpUseAvx2: import ./x86
 
+# The kernels below run with bounds/overflow checks OFF regardless of build mode.
+#
+# Nim's -d:release keeps both checks enabled (only -d:danger removes them), and in
+# these inner loops they are not a safety net but the primary cost: the L1-resident
+# SDOT GEMV measured 32 GFLOP/s with checks and 138 without — a 4.3x tax, larger
+# than every architectural improvement in this module combined. Every proc here
+# asserts its shape preconditions on entry (still active outside -d:release), the
+# loop bounds are derived from those same lengths, and the conformance tests pin
+# each kernel bit-for-bit — which exercises exactly this checks-off code, since the
+# test suite compiles without -d:release.
+{.push boundChecks: off, overflowChecks: off.}
+
 proc toFloat32Batch*(src: openArray[BF16]; dst: var openArray[float32]) =
   ## dst[i] = widen(src[i]). Exact. NEON/AVX2 do 8 lanes/iteration.
   assert src.len == dst.len
@@ -108,6 +120,19 @@ proc toFloat32Batch*(src: openArray[F16]; dst: var openArray[float32]) =
   let n = src.len
   when lpUseNeon:
     var i = 0
+    # 16/iteration, 4 independent convert chains: at 4/iteration this loop
+    # measured 4.2 Gelem/s against numpy's 10.2 — the ALU was idle between the
+    # dependent load->convert->store triples.
+    while i + 16 <= n:
+      let u0 = vld1q_u16(cast[ptr uint16](unsafeAddr src[i]))
+      let u1 = vld1q_u16(cast[ptr uint16](unsafeAddr src[i + 8]))
+      let f0 = vreinterpretq_f16_u16(u0)
+      let f1 = vreinterpretq_f16_u16(u1)
+      vst1q_f32(addr dst[i],      vcvt_f32_f16(vget_low_f16(f0)))
+      vst1q_f32(addr dst[i + 4],  vcvt_f32_f16(vget_high_f16(f0)))
+      vst1q_f32(addr dst[i + 8],  vcvt_f32_f16(vget_low_f16(f1)))
+      vst1q_f32(addr dst[i + 12], vcvt_f32_f16(vget_high_f16(f1)))
+      i += 16
     while i + 4 <= n:
       let h = vreinterpret_f16_u16(vld1_u16(cast[ptr uint16](unsafeAddr src[i])))
       vst1q_f32(addr dst[i], vcvt_f32_f16(h))
@@ -131,6 +156,16 @@ proc toF16Batch*(src: openArray[float32]; dst: var openArray[F16]) =
   let n = src.len
   when lpUseNeon:
     var i = 0
+    while i + 16 <= n:                       # 4 independent chains (see widen note above)
+      let h0 = vcvt_f16_f32(vld1q_f32(unsafeAddr src[i]))
+      let h1 = vcvt_f16_f32(vld1q_f32(unsafeAddr src[i + 4]))
+      let h2 = vcvt_f16_f32(vld1q_f32(unsafeAddr src[i + 8]))
+      let h3 = vcvt_f16_f32(vld1q_f32(unsafeAddr src[i + 12]))
+      vst1_u16(cast[ptr uint16](addr dst[i]),      vreinterpret_u16_f16(h0))
+      vst1_u16(cast[ptr uint16](addr dst[i + 4]),  vreinterpret_u16_f16(h1))
+      vst1_u16(cast[ptr uint16](addr dst[i + 8]),  vreinterpret_u16_f16(h2))
+      vst1_u16(cast[ptr uint16](addr dst[i + 12]), vreinterpret_u16_f16(h3))
+      i += 16
     while i + 4 <= n:
       let h = vcvt_f16_f32(vld1q_f32(unsafeAddr src[i]))
       vst1_u16(cast[ptr uint16](addr dst[i]), vreinterpret_u16_f16(h))
@@ -267,3 +302,122 @@ proc toFloat32Batch*(src: openArray[F8E4M3FNUZ]; dst: var openArray[float32]) =
       dst[i] = toFloat32(src[i]); inc i
   else:
     for i in 0 ..< n: dst[i] = toFloat32(src[i])
+
+{.pop.}
+
+proc toFloat32Batch*(src: openArray[F8E5M2FNUZ]; dst: var openArray[float32]) =
+  ## fp8 e5m2fnuz (AMD) -> fp32. e5m2fnuz is ALMOST the top byte of an fp16 —
+  ## same field widths — but bias 16 instead of 15, so the f16 reinterpretation
+  ## is exactly 2× the true value: multiply by 0.5. Two exceptions get fixed up
+  ## lanewise: codes with an all-ones exponent field are FINITE here (f16 reads
+  ## them as Inf/NaN), and 0x80 is the single fnuz NaN (f16 reads −0).
+  assert src.len == dst.len
+  let n = src.len
+  when lpUseNeon:
+    let sh8 = vdupq_n_s16(8'i16)
+    let e31 = vdupq_n_u32(0x7c'u32)
+    let m3  = vdupq_n_u32(0x03'u32)
+    let s80 = vdupq_n_u32(0x80'u32)
+    let four = vdupq_n_u32(4'u32)
+    let sh13 = vdupq_n_s32(13'i32)          # ×8192 for the (m+4)·8192 finite top values
+    let sh24 = vdupq_n_s32(24'i32)          # byte sign bit -> f32 sign bit
+    let qnan = vdupq_n_u32(0x7fc0_0000'u32)
+    var i = 0
+    while i + 8 <= n:
+      let u16v = vmovl_u8(vld1_u8(cast[ptr uint8](unsafeAddr src[i])))
+      let f = vreinterpretq_f16_u16(vshlq_u16(u16v, sh8))
+      template half(getHalfU, getHalfF, off: untyped) =
+        let u32v = vmovl_u16(getHalfU(u16v))
+        let normal = vreinterpretq_u32_f32(
+          vmulq_n_f32(vcvt_f32_f16(getHalfF(f)), 0.5'f32))
+        # finite all-ones-exponent codes: ±(m+4)·8192
+        let topMask = vceqq_u32(vandq_u32(u32v, e31), e31)
+        let mag = vreinterpretq_u32_f32(
+          vcvtq_f32_u32(vshlq_u32(vaddq_u32(vandq_u32(u32v, m3), four), sh13)))
+        let fixed = vorrq_u32(mag, vshlq_u32(vandq_u32(u32v, s80), sh24))
+        var bits32 = vbslq_u32(topMask, fixed, normal)
+        bits32 = vbslq_u32(vceqq_u32(u32v, s80), qnan, bits32)   # 0x80 -> NaN
+        vst1q_f32(addr dst[i + off], vreinterpretq_f32_u32(bits32))
+      half(vget_low_u16, vget_low_f16, 0)
+      half(vget_high_u16, vget_high_f16, 4)
+      i += 8
+    while i < n:
+      dst[i] = toFloat32(src[i]); inc i
+  else:
+    # scalar path (also the AVX2 build for now: this format is rare enough that
+    # the x86 vector variant hasn't been written; correctness is identical)
+    for i in 0 ..< n: dst[i] = toFloat32(src[i])
+
+# ---------------- fp8 ENCODE (f32 -> fp8), via round-to-odd f16 + a 64 KB table ----------------
+#
+# There is no direct hardware path. The construction: convert f32 to f16, look
+# the f16 code up in a table built from the scalar encoder over all 2^16 codes.
+# The naive version of that is WRONG: hardware f32->f16 rounds to nearest-even,
+# and a value just past an fp8 tie point collapses onto the tie (t is
+# f16-representable, everything within half-ulp16 of it lands ON it), turning
+# "round up" into "tie -> even" — the tests caught 128 such cases per format.
+#
+# The fix is Boldo–Melquiond: round f32 to f16 with ROUND-TO-ODD, then the
+# table's round-to-nearest is exact (f16's 11 bits >= fp8's p+2). Round-to-odd
+# is synthesized from the RNE result h: if the conversion was exact, keep h;
+# otherwise take the truncated-toward-zero magnitude (h, minus one if RNE
+# rounded away from zero) and force its last bit to 1. Exactness and direction
+# come from two vector compares against the widened-back h.
+#
+# Values past the format's top boundary (`mid`, the scalar encoder's own
+# constant) are pre-substituted with ±Inf so the table lands on the scalar's
+# past-top code. Tables build lazily per thread ({.threadvar.}, ~1 ms each).
+
+import ../float8 as f8mod
+
+template defF8Encode(T, toFn, batchName: untyped; mid: static float32) =
+  var lut {.threadvar.}: seq[uint8]   # threadvar: no race, one build per thread
+
+  proc batchName*(src: openArray[float32]; dst: var openArray[T]) =
+    ## f32 -> fp8, bit-identical to the scalar `toFn` for every input,
+    ## including NaN, ±Inf, past-top and subnormal values.
+    assert src.len == dst.len
+    if lut.len == 0:
+      lut = newSeq[uint8](65536)
+      for h in 0 ..< 65536:
+        lut[h] = uint8(toFn(toFloat32(F16(uint16(h)))))
+    let n = src.len
+    when lpUseNeon:
+      let midv = vdupq_n_f32(mid)
+      let infv = vdupq_n_u32(0x7f80_0000'u32)
+      let signv = vdupq_n_u32(0x8000_0000'u32)
+      var hbuf {.noinit.}: array[8, uint16]
+      var eqbuf {.noinit.}: array[8, uint32]
+      var awbuf {.noinit.}: array[8, uint32]
+      var i = 0
+      while i + 8 <= n:
+        template prep(off: untyped) =
+          let x0 = vld1q_f32(unsafeAddr src[i + off])
+          let past = vcgtq_f32(vabsq_f32(x0), midv)
+          let infS = vorrq_u32(infv, vandq_u32(vreinterpretq_u32_f32(x0), signv))
+          let x = vreinterpretq_f32_u32(vbslq_u32(past, infS, vreinterpretq_u32_f32(x0)))
+          let h = vcvt_f16_f32(x)                       # RNE
+          let back = vcvt_f32_f16(h)                    # exact widen of h
+          vst1_u16(addr hbuf[off], vreinterpret_u16_f16(h))
+          vst1q_u32(addr eqbuf[off], vceqq_f32(back, x))              # conversion exact?
+          vst1q_u32(addr awbuf[off], vcgtq_f32(vabsq_f32(back), vabsq_f32(x)))  # rounded away?
+        prep(0)
+        prep(4)
+        for j in 0 ..< 8:
+          var h = hbuf[j]
+          if eqbuf[j] == 0'u32:                          # inexact -> round-to-odd
+            var mag = h and 0x7fff'u16
+            if awbuf[j] != 0'u32: dec mag                # undo the away-rounding
+            h = (h and 0x8000'u16) or (mag or 1'u16)
+          dst[i + j] = T(lut[h])
+        i += 8
+      while i < n:
+        dst[i] = toFn(src[i]); inc i
+    else:
+      for i in 0 ..< n: dst[i] = toFn(src[i])
+
+# `mid` = the scalar encoder's past-top boundary: vmax + ulp(cmax)/2.
+defF8Encode(F8E4M3,     toF8E4M3,     toF8E4M3Batch,     464.0'f32)
+defF8Encode(F8E5M2,     toF8E5M2,     toF8E5M2Batch,     61440.0'f32)
+defF8Encode(F8E4M3FNUZ, toF8E4M3FNUZ, toF8E4M3FNUZBatch, 248.0'f32)
+defF8Encode(F8E5M2FNUZ, toF8E5M2FNUZ, toF8E5M2FNUZBatch, 61440.0'f32)

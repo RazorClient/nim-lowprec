@@ -52,7 +52,7 @@ jobs:
           mkdir -p build
           # Keep this list in sync with the `simd` task in nim_lowprec.nimble —
           # every SIMD test must run on BOTH ISAs, or an AVX2 lane bug ships.
-          for t in test_bf16_simd test_quant_simd test_blas1_simd test_f8_simd; do
+          for t in test_bf16_simd test_quant_simd test_blas1_simd test_f8_simd test_parallel test_sdot; do
             nim c --hints:off -d:lpSimd=${{ matrix.target }} ${{ matrix.passc }} \
               -o:"$PWD/build/$t" "tests/$t.nim"
             test -x "build/$t"

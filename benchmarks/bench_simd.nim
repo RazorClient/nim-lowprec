@@ -89,3 +89,18 @@ template f8Bench(TT: untyped; nm: string) =
 f8Bench(F8E5M2, "fp8 e5m2")
 f8Bench(F8E4M3, "fp8 e4m3")
 f8Bench(F8E4M3FNUZ, "fp8 e4m3fnuz")
+f8Bench(F8E5M2FNUZ, "fp8 e5m2fnuz")
+
+# ---- fp8 ENCODE: round-to-odd f16 + 64 KB LUT vs the scalar encoder ----
+template f8EncBench(TT, toFn, batchFn: untyped; nm: string) =
+  block:
+    var dst8 = newSeq[TT](N)
+    var g = elemGroup("f32 -> " & nm, N)
+    g.scalarRow float(uint8(dst8[mid])):
+      for i in 0 ..< N: dst8[i] = toFn(f[i])
+    g.kernelRow float(uint8(dst8[mid])):
+      batchFn(f, dst8)
+    g.report()
+
+f8EncBench(F8E4M3, toF8E4M3, toF8E4M3Batch, "fp8 e4m3 (encode)")
+f8EncBench(F8E5M2, toF8E5M2, toF8E5M2Batch, "fp8 e5m2 (encode)")

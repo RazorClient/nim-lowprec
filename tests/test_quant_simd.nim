@@ -3,7 +3,7 @@
 ## tolerance, not bit-for-bit. Local only.
 
 import std/[unittest, math]
-import nim_lowprec/[intx, mxfloat, quant, ggml, simd/dequant, simd/convert]
+import nim_lowprec/[intx, mxfloat, quant, ggml, float16, simd/dequant, simd/convert]
 
 proc scalarDeq[T](q: openArray[T]; p: QParams): seq[float32] =
   result = newSeq[float32](q.len)
@@ -208,3 +208,98 @@ suite "SIMD ggml Q8_0 / Q4_0 fused GEMV":
       maxRel = max(maxRel, abs(float64(y[row]) - refv[row]) / (abs(refv[row]) + 1e-4))
     check maxRel < 1e-3
 
+
+suite "ggml block dequant SIMD == scalar":
+  # Elementwise (value × block scale), so bit-exact — same discipline as
+  # `dequantizeBatch`. Blocks carry varied d (positive, negative, tiny) and the
+  # full int8 / nibble code range.
+  test "Q8_0 batch dequant bit-identical":
+    const NB = 129                              # odd count: no accidental alignment
+    var blocks = newSeq[BlockQ8_0](NB)
+    for b in 0 ..< NB:
+      blocks[b].d = toF16(float32(b - 64) * 0.0117'f32 + 0.001'f32)
+      for i in 0 ..< QK: blocks[b].qs[i] = int8(((b * 31 + i * 7) mod 255) - 127)
+    var want = newSeq[float32](NB * QK)
+    var got = newSeq[float32](NB * QK)
+    dequantizeQ8_0(blocks, want)
+    dequantizeQ8_0Batch(blocks, got)
+    var mism = 0
+    for i in 0 ..< want.len:
+      if cast[uint32](got[i]) != cast[uint32](want[i]): inc mism
+    check mism == 0
+
+  test "Q4_0 batch dequant bit-identical":
+    const NB = 129
+    var blocks = newSeq[BlockQ4_0](NB)
+    for b in 0 ..< NB:
+      blocks[b].d = toF16(float32(64 - b) * 0.0093'f32 + 0.002'f32)
+      for i in 0 ..< QK div 2: blocks[b].qs[i] = uint8((b * 13 + i * 17) and 0xff)
+    var want = newSeq[float32](NB * QK)
+    var got = newSeq[float32](NB * QK)
+    dequantizeQ4_0(blocks, want)
+    dequantizeQ4_0Batch(blocks, got)
+    var mism = 0
+    for i in 0 ..< want.len:
+      if cast[uint32](got[i]) != cast[uint32](want[i]): inc mism
+    check mism == 0
+
+suite "ggml block quantize SIMD == scalar":
+  # The encode direction: same amax, same d, same multiply-by-inverse, same
+  # ties-away rounding, same clamp — so bit-exact, including the packed d.
+  test "quantizeQ8_0Batch bit-identical":
+    const NB = 257
+    var x = newSeq[float32](NB * QK)
+    var u = 123456789'u32
+    for i in 0 ..< x.len:
+      u = u * 1664525'u32 + 1013904223'u32
+      x[i] = (float32(u shr 8) / float32(1'u32 shl 24) - 0.5'f32) * 20.0'f32
+    x[37] = 0.0'f32                                # a block with a zero
+    for i in 5 * QK ..< 6 * QK: x[i] = 0.0'f32     # an all-zero block (d = 0 path)
+    var a = newSeq[BlockQ8_0](NB)
+    var b = newSeq[BlockQ8_0](NB)
+    quantizeQ8_0(x, a)
+    quantizeQ8_0Batch(x, b)
+    var mism = 0
+    for i in 0 ..< NB:
+      if bits(a[i].d) != bits(b[i].d): inc mism
+      for j in 0 ..< QK:
+        if a[i].qs[j] != b[i].qs[j]: inc mism
+    check mism == 0
+
+  test "quantizeQ4_0Batch bit-identical":
+    const NB = 257
+    var x = newSeq[float32](NB * QK)
+    var u = 987654321'u32
+    for i in 0 ..< x.len:
+      u = u * 1664525'u32 + 1013904223'u32
+      x[i] = (float32(u shr 8) / float32(1'u32 shl 24) - 0.5'f32) * 16.0'f32
+    for i in 9 * QK ..< 10 * QK: x[i] = 0.0'f32
+    var a = newSeq[BlockQ4_0](NB)
+    var b = newSeq[BlockQ4_0](NB)
+    quantizeQ4_0(x, a)
+    quantizeQ4_0Batch(x, b)
+    var mism = 0
+    for i in 0 ..< NB:
+      if bits(a[i].d) != bits(b[i].d): inc mism
+      for j in 0 ..< QK div 2:
+        if a[i].qs[j] != b[i].qs[j]: inc mism
+    check mism == 0
+
+suite "per-group I8 quantize SIMD == scalar":
+  test "quantizeBatch bit-identical (per-group, per-tensor, ragged tail)":
+    for (n, gs, scheme) in [(4096, 128, qPerGroup), (4099, 64, qPerGroup), (1000, 0, qPerTensor)]:
+      var x = newSeq[float32](n)
+      var u = 55555'u32
+      for i in 0 ..< n:
+        u = u * 1664525'u32 + 1013904223'u32
+        x[i] = (float32(u shr 8) / float32(1'u32 shl 24) - 0.5'f32) * 30.0'f32
+      let p = (if scheme == qPerTensor: calibrateSymmetric(x, n, 127.0'f32)
+               else: calibrateSymmetric(x, gs, 127.0'f32))
+      var a = newSeq[I8](n)
+      var b = newSeq[I8](n)
+      quantize(x, p, a)
+      quantizeBatch(x, p, b)
+      var mism = 0
+      for i in 0 ..< n:
+        if int8(a[i]) != int8(b[i]): inc mism
+      check mism == 0

@@ -25,12 +25,17 @@ task test, "Run the correctness suite (this is what CI runs)":
   exec "nim c -r --hints:off tests/test_mxfp6_pack.nim"
   exec "nim c -r --hints:off tests/test_stochastic.nim"
   exec "nim c -r --hints:off tests/test_ggml.nim"
+  exec "nim c -r --hints:off tests/test_parallel.nim"
+  exec "nim c -r --hints:off tests/test_sdot.nim"
 
-task simd, "Run NEON SIMD tests locally on arm64 (x86 SIMD runs in the simd-x86 CI)":
+task simd, "Run NEON SIMD tests (arm64; CI runs this on the macOS runners; x86 SIMD has its own workflow)":
   exec "nim c -r --hints:off tests/test_bf16_simd.nim"
   exec "nim c -r --hints:off tests/test_quant_simd.nim"
   exec "nim c -r --hints:off tests/test_blas1_simd.nim"
   exec "nim c -r --hints:off tests/test_f8_simd.nim"
+  # second run of the SDOT suite with the stream threshold at 0, so the
+  # row-at-a-time paths (normally only taken above 12 MB of weights) are pinned too
+  exec "nim c -r --hints:off -d:lpStreamBytes=0 tests/test_sdot.nim"
 
 task example, "Run the quickstart example":
   exec "nim c -r --hints:off examples/quickstart.nim"
@@ -48,6 +53,9 @@ const benchmarkFiles = [
   "bench_blas1",    # bf16 dot
   "bench_gemv",     # fused dequant-GEMV: int8, packed int4, packed mxfp4
   "bench_ggml",     # ggml Q8_0 / Q4_0: block dequant + fused GEMV
+  "bench_parallel", # multi-core scaling of the fused GEMV (caller-side threading)
+  "bench_sdot",     # int8-activation GEMV: SDOT + 4-bit weights vs the fp32 path
+  "bench_gemm",     # multi-column GEMM: weight-stream reuse across n activation columns
 ]
 
 proc runBenchmarks(flags: string) =
