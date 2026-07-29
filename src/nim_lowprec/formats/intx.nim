@@ -9,7 +9,7 @@
 ## just the mechanical two's-complement values and the exact bit/nibble order.
 
 import std/math
-import ./dtypes
+import ../dtypes
 
 type
   I8* = distinct int8 ## signed 8-bit integer

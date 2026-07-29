@@ -15,7 +15,7 @@
 ## Every comparison here is BIT-exact. Suites skip when vectors are absent.
 
 import std/[unittest, os, math]
-import nim_lowprec/[float16, float8, mxfloat, intx, ggml, quant, nvfp4]
+import nim_lowprec
 
 # The references round mul-then-sub in two steps (numpy); no compiler FMAs here.
 {.localPassc: "-ffp-contract=off".}

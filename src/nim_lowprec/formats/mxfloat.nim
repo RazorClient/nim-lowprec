@@ -16,7 +16,7 @@
 ## float6_e2m3fn / float6_e3m2fn / float8_e8m0fnu).
 
 import std/math
-import ./common, ./tinyfloat
+import ../common, ./tinyfloat
 
 type
   F4E2M1* = distinct uint8 ## MXFP4 e2m1 (value in low 4 bits)

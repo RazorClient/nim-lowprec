@@ -3,7 +3,7 @@
 #   - a differential check against ml_dtypes golden vectors
 
 import std/[unittest, streams, os]
-import nim_lowprec/bfloat16
+import nim_lowprec
 
 func f32bits(u: uint32): float32 =
   cast[float32](u)

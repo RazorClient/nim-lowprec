@@ -13,7 +13,7 @@
 ## Parsing a `.gguf` container's headers/metadata is a loader's job, one layer up.)
 
 import std/math
-import ./float16
+import ../formats/float16
 
 # Q4_K's dequant is `d·q − m`: Apple clang's default -ffp-contract=fast would
 # fuse that into one fma (single rounding) and break bit-exactness against the

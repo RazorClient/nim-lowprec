@@ -4,7 +4,7 @@
 ## names mirror the NumPy source to keep the port auditable. Verified bit-exact
 ## against ml_dtypes float16.
 
-import ./common
+import ../common
 
 type F16* = distinct uint16
 

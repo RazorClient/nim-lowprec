@@ -7,7 +7,8 @@
 ## far larger than the work (must degrade to serial, not spawn 64 threads).
 
 import std/unittest
-import nim_lowprec/[intx, mxfloat, ggml, float16, simd/dequant, parallel]
+import nim_lowprec
+import nim_lowprec/simd/dequant
 
 const
   K = 512

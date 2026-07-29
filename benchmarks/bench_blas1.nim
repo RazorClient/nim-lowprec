@@ -8,7 +8,7 @@
 ## streams at 2 bytes/element. The gap between the two speedups is the story: this
 ## kernel is 4 FLOP per 4 bytes loaded, so it stops being ALU-limited very quickly.
 
-import nim_lowprec/[bfloat16, float16, reduce, simd/blas1]
+import nim_lowprec/[formats/bfloat16, formats/float16, kernels/reduce, simd/blas1]
 import ./harness
 
 header "bf16 BLAS-1"

@@ -4,7 +4,7 @@
 ##   fp32 activations       the existing kernel: widen int8 -> fp32, FP FMA
 ##   int8 acts (SDOT)       `vdotq_s32`, 16 MACs per instruction, int32 accumulate
 ##   int8 acts + 4-bit w    same kernel over PACKED int4 — half the weight bytes
-##   ... + N threads        row-sharded via nim_lowprec/parallel
+##   ... + N threads        row-sharded via nim_lowprec/kernels/parallel
 ##
 ## The int8-activation rows include the cost of quantizing `x` on every call, since
 ## a real caller pays that per matvec — it is O(K) against the GEMV's O(M·K), and
@@ -16,7 +16,7 @@
 ## is reported in its own group.
 
 import std/cpuinfo
-import nim_lowprec/[intx, quant, simd/dequant, simd/target, parallel]
+import nim_lowprec/[formats/intx, quantization/quant, simd/dequant, simd/target, kernels/parallel]
 import ./harness
 
 const

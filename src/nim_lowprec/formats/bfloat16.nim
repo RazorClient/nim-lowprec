@@ -5,7 +5,7 @@
 ## NaN is mapped to a canonical, sign-preserving quiet NaN instead. Verified
 ## bit-exact against ml_dtypes bfloat16.
 
-import ./common
+import ../common
 
 type BF16* = distinct uint16 ## A bfloat16 value: the high 16 bits of a `float32`.
 

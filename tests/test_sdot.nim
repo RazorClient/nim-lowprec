@@ -11,7 +11,8 @@
 ## elsewhere the integer fallback, which must produce identical bits.
 
 import std/unittest
-import nim_lowprec/[intx, simd/dequant, simd/target]
+import nim_lowprec
+import nim_lowprec/[simd/dequant, simd/target]
 
 # The references below must round exactly like the kernels: mul then add, two
 # roundings. Apple clang's default -ffp-contract=fast would fuse them into an fma
@@ -152,7 +153,6 @@ suite "int8-activation GEMV == exact integer reference":
     dequantGemvI4Q8(packI4(vals), wScales, gs, xq, xScales, b)
     checkBits(b, a)
 
-import nim_lowprec/[ggml, float16]
 
 suite "ggml-layout SDOT GEMV == exact reference":
   ## Weights AND activations in ggml block format, scale inline per block.

@@ -2,7 +2,7 @@
 ## needed; the value set is small and the packing layout is asserted directly).
 
 import std/unittest
-import nim_lowprec/intx
+import nim_lowprec
 
 suite "I8":
   test "integer round-trip, clamp, rounding":

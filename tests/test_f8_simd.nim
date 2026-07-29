@@ -2,7 +2,8 @@
 ## Exhaustive over all 256 codes; the ragged length exercises the scalar tail. Local.
 
 import std/unittest
-import nim_lowprec/[float8, float16, simd/convert]
+import nim_lowprec
+import nim_lowprec/simd/convert
 
 template f8Suite(TT: untyped, nm: static string) =
   suite nm:

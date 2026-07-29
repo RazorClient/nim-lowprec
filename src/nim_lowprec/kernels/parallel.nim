@@ -36,8 +36,9 @@
 ## deliberately owns no long-lived threads.
 
 import std/[cpuinfo, locks]
-import ./intx, ./ggml
-import ./simd/dequant
+import ../formats/intx
+import ../quantization/ggml
+import ../simd/dequant
 
 const minRowsPerThread* = 64
   ## Below this many rows per shard, spawning costs more than it saves.

@@ -24,7 +24,8 @@
 ## order legitimately differs from scalar). NEON + AVX2, scalar fallback elsewhere;
 ## see the pragma blocks below for why checks and fp contraction are pinned off.
 
-import ../intx, ../quant, ../float16, ../ggml
+import ../formats/intx, ../formats/float16
+import ../quantization/quant, ../quantization/ggml
 import ./target
 
 # Apple clang defaults to -ffp-contract=fast, which silently fuses a vector

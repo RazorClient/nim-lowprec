@@ -6,8 +6,8 @@
 ## not bit-for-bit. The bf16 widen is the same "shift the 16 stored bits into the
 ## fp32 high half" used by simd/convert, so no new intrinsics are needed.
 
-import ../bfloat16
-import ../float16
+import ../formats/bfloat16
+import ../formats/float16
 import ./target
 when lpUseNeon:
   import ./neon

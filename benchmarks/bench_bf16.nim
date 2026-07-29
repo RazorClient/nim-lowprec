@@ -6,7 +6,7 @@
 ## The batch/vectorized throughput comparison is `bench_simd`; there is nothing to
 ## compare against here, so this group reports one row.
 
-import nim_lowprec/bfloat16
+import nim_lowprec/formats/bfloat16
 import ./harness
 
 const N = 20_000_000

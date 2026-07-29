@@ -2,7 +2,7 @@
 ## activates: ONE set of generics runs over bf16, fp16, and int8.
 
 import std/unittest
-import nim_lowprec/[bfloat16, float16, intx, reduce]
+import nim_lowprec
 
 suite "reduce (generic over LowPrec)":
   test "sum / dot / absmax / nrm2 on bf16":

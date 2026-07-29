@@ -2,7 +2,7 @@
 ## round-trips bounded by the quantization step (+ the fp16-scale error).
 
 import std/[unittest, math]
-import nim_lowprec/[float16, ggml]
+import nim_lowprec
 
 suite "ggml block formats":
   test "Q8_0 dequant is d·q (hand-built block)":

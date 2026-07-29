@@ -13,7 +13,7 @@
 ## reference loops take `openArray` params like the kernels do, so the C compiler
 ## has the same auto-vectorization opportunity on both sides.
 
-import nim_lowprec/[float16, ggml, simd/dequant, simd/target]
+import nim_lowprec/[formats/float16, quantization/ggml, simd/dequant, simd/target]
 import ./harness
 
 const

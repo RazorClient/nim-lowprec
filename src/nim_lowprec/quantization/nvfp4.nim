@@ -28,7 +28,7 @@
 ## same. NVFP4 assumes tensor values within E4M3 scale range of each other;
 ## check `blockScales` for zeros if your data might not be.
 
-import ./mxfloat, ./float8
+import ../formats/mxfloat, ../formats/float8
 
 # The multiply-then-subtract/multiply chains must round exactly like the numpy
 # oracle: no compiler-invented FMAs (same policy as simd/dequant).

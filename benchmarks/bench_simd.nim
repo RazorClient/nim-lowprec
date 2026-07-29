@@ -10,7 +10,7 @@
 ## be auto-vectorized by the C compiler (the globals may alias), which would hand
 ## the SIMD row a few x of free speedup that has nothing to do with intrinsics.
 
-import nim_lowprec/[bfloat16, float16, float8, simd/convert]
+import nim_lowprec/[formats/bfloat16, formats/float16, formats/float8, simd/convert]
 import ./harness
 
 const N = 16_000_000

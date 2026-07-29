@@ -4,7 +4,7 @@
 ## skip if vectors are absent. LITTLE-ENDIAN ONLY.
 
 import std/[unittest, streams, os]
-import nim_lowprec/float8
+import nim_lowprec
 
 func f32bits(u: uint32): float32 =
   cast[float32](u)

@@ -1,5 +1,5 @@
 import std/[unittest, math]
-import nim_lowprec/bfloat16
+import nim_lowprec
 
 suite "bf16 conversions":
   test "round trip of exactly representable values":

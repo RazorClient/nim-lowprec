@@ -1,7 +1,8 @@
 ## SIMD batch convert must be BIT-IDENTICAL to the scalar reference. Local only.
 
 import std/unittest
-import nim_lowprec/[bfloat16, float16, simd/convert]
+import nim_lowprec
+import nim_lowprec/simd/convert
 
 suite "bf16 SIMD == scalar":
   test "we are exercising the intended SIMD path":

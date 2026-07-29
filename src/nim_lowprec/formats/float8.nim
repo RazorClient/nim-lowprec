@@ -12,7 +12,7 @@
 ## (monotonic) finite code space, with per-format saturation / Inf / NaN edges.
 
 import std/math
-import ./common, ./tinyfloat
+import ../common, ./tinyfloat
 
 type
   F8E4M3* = distinct uint8 ## OCP fp8 e4m3fn

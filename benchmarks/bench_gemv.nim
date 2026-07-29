@@ -14,7 +14,7 @@
 ## auto-vectorization (the globals may alias) and hand the SIMD row free speedup
 ## that has nothing to do with intrinsics.
 
-import nim_lowprec/[intx, mxfloat, simd/dequant]
+import nim_lowprec/[formats/intx, formats/mxfloat, simd/dequant]
 import ./harness
 
 const

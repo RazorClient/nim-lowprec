@@ -14,7 +14,7 @@
 ## Per-CHANNEL quant needs an axis + shape → that's the tensor layer's job.
 
 import std/math
-import ./common
+import ../common
 
 type
   QScheme* = enum

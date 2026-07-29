@@ -6,7 +6,7 @@
 ## is EXPECTED to sit at ~1x, and a suspiciously fast one would mean the fallback
 ## stopped being taken.
 
-import nim_lowprec/[intx, quant, simd/dequant]
+import nim_lowprec/[formats/intx, quantization/quant, simd/dequant]
 import ./harness
 
 const N = 16_000_000

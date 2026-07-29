@@ -3,7 +3,8 @@
 ## tolerance, not bit-for-bit. Local only.
 
 import std/[unittest, math]
-import nim_lowprec/[intx, mxfloat, quant, ggml, float16, simd/dequant, simd/convert]
+import nim_lowprec
+import nim_lowprec/[simd/dequant, simd/convert]
 
 proc scalarDeq[T](q: openArray[T], p: QParams): seq[float32] =
   result = newSeq[float32](q.len)

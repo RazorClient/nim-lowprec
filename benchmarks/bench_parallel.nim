@@ -1,4 +1,4 @@
-## Multi-core scaling of the fused dequant-GEMV (`nim_lowprec/parallel`).
+## Multi-core scaling of the fused dequant-GEMV (`nim_lowprec/kernels/parallel`).
 ##
 ## The baseline row is the serial kernel; each following row is the same kernel
 ## row-sharded across N threads, so the speedup column IS the scaling curve.
@@ -11,7 +11,7 @@
 ## bandwidth-hungry kernel as well as a P-core.
 
 import std/cpuinfo
-import nim_lowprec/[intx, ggml, float16, simd/dequant, parallel]
+import nim_lowprec/[formats/intx, formats/float16, quantization/ggml, simd/dequant, kernels/parallel]
 import ./harness
 
 const

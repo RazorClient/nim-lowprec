@@ -7,7 +7,7 @@
 ## Every GEMM column is bit-identical to the corresponding GEMV (pinned in
 ## tests/test_sdot.nim), so no checksum machinery is needed here.
 import std/[times, monotimes, strutils]
-import nim_lowprec/[intx, simd/dequant]
+import nim_lowprec/[formats/intx, simd/dequant]
 
 const M = 4096
 const K = 14336

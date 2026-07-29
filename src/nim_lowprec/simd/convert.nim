@@ -10,7 +10,7 @@
 ## its path at build time and CI verifies it. bf16<->fp32: 8 lanes widen / 4 lanes
 ## narrow. fp16<->fp32: F16C `_mm256_cvtph_ps` / `_mm256_cvtps_ph`, 8 lanes.
 
-import ../bfloat16, ../float16, ../float8
+import ../formats/bfloat16, ../formats/float16, ../formats/float8
 import ./target
 export target # re-export simdBackend (+ the lpUse* selection flags)
 when lpUseNeon:
@@ -400,7 +400,7 @@ proc toFloat32Batch*(src: openArray[F8E5M2FNUZ], dst: var openArray[float32]) =
 # constant) are pre-substituted with ±Inf so the table lands on the scalar's
 # past-top code. Tables build lazily per thread ({.threadvar.}, ~1 ms each).
 
-import ../float8 as f8mod
+import ../formats/float8 as f8mod
 
 template defF8Encode(T, toFn, batchName: untyped, mid: static float32) =
   var lut {.threadvar.}: seq[uint8] # threadvar: no race, one build per thread

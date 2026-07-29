@@ -3,7 +3,7 @@
 ## The RNG state is threaded by the caller (var uint32, xorshift32); no globals.
 
 import std/unittest
-import nim_lowprec/bfloat16
+import nim_lowprec
 
 # a separate xorshift32, used only to generate random fp32 *inputs* for (a)
 proc nextRand(s: var uint32): uint32 =

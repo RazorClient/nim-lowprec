@@ -3,7 +3,7 @@
 ## (both are 6-bit codes in the low 6 bits) and ragged tails.
 
 import std/unittest
-import nim_lowprec/mxfloat
+import nim_lowprec
 
 func packedLen(n: int): int =
   (n * 6 + 7) div 8

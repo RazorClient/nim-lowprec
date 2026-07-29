@@ -2,7 +2,7 @@
 ## quantize/dequantize round-trip within one quantization step.
 
 import std/[unittest, math]
-import nim_lowprec/[intx, mxfloat, quant]
+import nim_lowprec
 
 suite "quant round-trip":
   test "int8, per-tensor: reconstruction error ≤ step/2":

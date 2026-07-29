@@ -9,7 +9,7 @@
 ## kernel layer's job (they need tiling, packing, threading), not the substrate.
 
 import std/math
-import ./common
+import ../common
 
 template foldDecoded(x, contribution: untyped): float32 =
   ## Accumulate `x` into a float32 total (the accumulate-WIDE half of the
