@@ -16,7 +16,9 @@
 ## is reported in its own group.
 
 import std/cpuinfo
-import nim_lowprec/[formats/intx, quantization/quant, simd/dequant, simd/target, kernels/parallel]
+import
+  nim_lowprec/
+    [formats/intx, quantization/quant, simd/dequant, simd/target, kernels/parallel]
 import ./harness
 
 const

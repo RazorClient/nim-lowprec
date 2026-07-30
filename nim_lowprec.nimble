@@ -8,8 +8,6 @@ srcDir = "src"
 # Dependencies
 requires "nim >= 2.2.0"
 
-# Tasks
-
 const
   testOutDir = "build/tests"
   exampleOutDir = "build/examples"
@@ -22,8 +20,8 @@ proc ensureOutDir(dir: string) =
 proc runTestFile(file: string, flags = "") =
   ensureOutDir(testOutDir)
   ensureOutDir(nimCacheDir)
-  exec "nim c -r --nimcache:" & nimCacheDir & " --outdir:" & testOutDir &
-    " --hints:off " & flags & " " & file
+  exec "nim c -r --nimcache:" & nimCacheDir & " --outdir:" & testOutDir & " --hints:off " &
+    flags & " " & file
 
 proc runExampleFile(file: string, flags = "") =
   ensureOutDir(exampleOutDir)

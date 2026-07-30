@@ -97,6 +97,7 @@ func encode8(x: float32, f: Fp8Fmt): uint8 =
     return (
       if f.fnuz: 0x00'u8 else: signBit # rounds to zero (fnuz has no -0)
     )
+
   signBit or uint8(code)
 
 # ---- generate the four types' identical API surface via one template ----

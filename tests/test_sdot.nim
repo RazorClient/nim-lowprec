@@ -153,7 +153,6 @@ suite "int8-activation GEMV == exact integer reference":
     dequantGemvI4Q8(packI4(vals), wScales, gs, xq, xScales, b)
     checkBits(b, a)
 
-
 suite "ggml-layout SDOT GEMV == exact reference":
   ## Weights AND activations in ggml block format, scale inline per block.
   ## Per-block sums are exact int32; the fp accumulation order is the documented

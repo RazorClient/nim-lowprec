@@ -11,7 +11,9 @@
 ## bandwidth-hungry kernel as well as a P-core.
 
 import std/cpuinfo
-import nim_lowprec/[formats/intx, formats/float16, quantization/ggml, simd/dequant, kernels/parallel]
+import
+  nim_lowprec/
+    [formats/intx, formats/float16, quantization/ggml, simd/dequant, kernels/parallel]
 import ./harness
 
 const

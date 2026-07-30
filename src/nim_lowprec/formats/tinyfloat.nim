@@ -43,4 +43,6 @@ func nearestCode*(a: float64, ebits, mbits, bias, cmax: int): int =
   elif a > midv:
     cHi
   else:
-    (if (cLo and 1) == 0: cLo else: cHi) # tie → even
+    (
+      if (cLo and 1) == 0: cLo else: cHi # tie → even
+    )

@@ -17,7 +17,7 @@ type
   DTypeKind* = enum
     dkFloat # IEEE-like float (exponent + mantissa)
     dkInt # integer
-    dkScale # scale-only exponent code (E8M0)
+    dkScale # scale-only exponent code
 
 func bits*(d: DType): int {.inline.} =
   case d
@@ -37,8 +37,6 @@ func isSubByte*(d: DType): bool {.inline.} =
   d in {dtF6E2M3, dtF6E3M2, dtF4E2M1, dtI4, dtI1}
 
 func hasInf*(d: DType): bool {.inline.} =
-  # Whether the format encodes ±Inf. 
-  # When false, overflow must SATURATE.
   d in {dtBF16, dtF16, dtF8E5M2}
 
 func name*(d: DType): string {.inline.} =
