@@ -1,9 +1,3 @@
-## nim_lowprec/float16 — IEEE binary16 (1/5/10) <-> float32 bit conversions,
-## ported from NumPy's half<->float routines: round-to-nearest-even, subnormal
-## normalization, and Inf/NaN with mantissa payload preserved. Local variable
-## names mirror the NumPy source to keep the port auditable. Verified bit-exact
-## against ml_dtypes float16.
-
 import ../common
 
 type F16* = distinct uint16

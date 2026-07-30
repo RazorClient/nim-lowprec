@@ -1,26 +1,10 @@
-## nim_lowprec/intx — small signed integers + bit/nibble packing for quantization.
-##
-##   I8   signed 8-bit   (-128..127), one byte each
-##   I4   signed 4-bit   (-8..7),     packed two-per-byte, ggml LOW-nibble-first
-##   I1   a sign bit      (+1 / -1),  packed eight-per-byte, LSB-first
-##
-## These are STORAGE + PACKING primitives only. The quant *scheme* (per-block
-## offsets, scales, super-block layouts) lives one layer up — this module owns
-## just the mechanical two's-complement values and the exact bit/nibble order.
-
 import std/math
 import ../dtypes
 
 type
-  I8* = distinct int8 ## signed 8-bit integer
-  I4* = distinct int8 ## signed 4-bit integer, logical value in -8..7
-  I1* = distinct uint8 ## a sign bit: 0 → +1, 1 → −1
-
-# ---- shared surface for the int8-backed types (I8, I4) via one template ----
-# Both are `distinct int8`, so value decode, structural ==/$, and the
-# LowPrec/DType hooks are identical. `toFn` is the float32→T rounding+clamp
-# constructor — its range differs per type, so it stays hand-written and is
-# threaded in as a parameter (mirroring float8.nim's `defF8`).
+  I8* = distinct int8
+  I4* = distinct int8
+  I1* = distinct uint8
 
 template defInt8Backed(T, toFn, BITS, DT: untyped) =
   func toFloat32*(x: T): float32 {.inline.} =
@@ -38,21 +22,17 @@ template defInt8Backed(T, toFn, BITS, DT: untyped) =
   func dtypeCode*(_: typedesc[T]): DType {.inline.} =
     DT
 
-# ---------- I8 ----------
 func toI8*(f: float32): I8 {.inline.} =
-  ## Round-to-nearest (ties away from zero) then clamp to the int8 range.
   I8(int8(clamp(round(f), -128.0'f32, 127.0'f32)))
 defInt8Backed(I8, toI8, 8, dtI8)
 
-# ---------- I4 ----------
-func value*(x: I4): int {.inline.} = ## logical -8..7
+func value*(x: I4): int {.inline.} =
   int(int8(x))
 func toI4*(f: float32): I4 {.inline.} =
   I4(int8(clamp(round(f), -8.0'f32, 7.0'f32)))
-func nibble*(x: I4): uint8 {.inline.} = ## two's-complement 4-bit
+func nibble*(x: I4): uint8 {.inline.} =
   uint8(int8(x)) and 0x0f'u8
 func fromNibble*(n: uint8): I4 {.inline.} =
-  ## Decode a 4-bit two's-complement nibble (0..15) → -8..7.
   let v = n and 0x0f'u8
   I4(
     if v >= 8'u8:
@@ -62,13 +42,9 @@ func fromNibble*(n: uint8): I4 {.inline.} =
   )
 defInt8Backed(I4, toI4, 4, dtI4)
 
-# ---------- I1 (sign bit) ----------
-# uint8-backed with ±1 sign semantics — decode is NOT an int cast — so the value
-# conversions stay hand-written; only the trailing hooks match the others.
 func toFloat32*(x: I1): float32 {.inline.} =
   (if (uint8(x) and 1'u8) != 0'u8: -1.0'f32 else: 1.0'f32)
 func toI1*(f: float32): I1 {.inline.} =
-  ## Negative (including -0.0) → −1; otherwise +1.
   I1(if (cast[uint32](f) shr 31) != 0'u32: 1'u8 else: 0'u8)
 func decode*(x: I1): float32 {.inline.} =
   x.toFloat32
@@ -79,10 +55,7 @@ func storageBits*(_: typedesc[I1]): int {.inline.} =
 func dtypeCode*(_: typedesc[I1]): DType {.inline.} =
   dtI1
 
-# ---------- packing ----------
 func packInt4*(src: openArray[I4], dst: var openArray[byte]) =
-  ## Pack signed 4-bit values two per byte — LOW nibble = even index (ggml order).
-  ## `dst.len` must be at least `(src.len + 1) div 2`.
   assert dst.len >= (src.len + 1) div 2
   var i = 0
   var j = 0
@@ -94,7 +67,6 @@ func packInt4*(src: openArray[I4], dst: var openArray[byte]) =
     dst[j] = nibble(src[i])
 
 func unpackInt4*(src: openArray[byte], dst: var openArray[I4]) =
-  ## Inverse of `packInt4` — fills `dst` (two values per source byte).
   var j = 0
   for b in src:
     if j < dst.len:
@@ -105,8 +77,6 @@ func unpackInt4*(src: openArray[byte], dst: var openArray[I4]) =
       inc j
 
 func packInt1*(src: openArray[I1], dst: var openArray[byte]) =
-  ## Pack sign bits eight per byte, LSB-first (element 0 → bit 0).
-  ## `dst.len` must be at least `(src.len + 7) div 8`.
   assert dst.len >= (src.len + 7) div 8
   for k in 0 ..< dst.len:
     dst[k] = 0'u8
